@@ -1,0 +1,24 @@
+# ========== 环境与密钥 ==========
+.env
+.venv/
+__pycache__/
+*.pyc
+.first_run_done
+
+# ========== 个人生成内容 ==========
+# data/ 和 archive/ 目录保留，但其中的个人内容忽略（仅 .gitkeep 入库）
+data/*
+!data/.gitkeep
+archive/*
+!archive/.gitkeep
+
+# ========== 编辑器/系统 ==========
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ========== TRAE 本地状态 ==========
+.trae/
