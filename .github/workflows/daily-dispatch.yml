@@ -1,0 +1,188 @@
+name: Daily Academic Dispatch
+
+on:
+  schedule:
+    # 07:00 Asia/Shanghai is 23:00 UTC on the previous day.
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Dispatch date in YYYY-MM-DD. Empty means today in Asia/Shanghai."
+        required: false
+        type: string
+      mock:
+        description: "Use built-in mock output instead of a real agent."
+        required: false
+        type: boolean
+        default: false
+      send_email:
+        description: "Send email after TTS. Scheduled runs always send email."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  DISPATCH_MODE: ci
+  DISPATCH_CONFIG: config.md
+  PYTHONUTF8: "1"
+
+jobs:
+  generate:
+    if: ${{ github.event_name != 'schedule' || vars.DISPATCH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      dispatch_date: ${{ steps.metadata.outputs.dispatch_date }}
+      mock: ${{ steps.metadata.outputs.mock }}
+      send_email: ${{ steps.metadata.outputs.send_email }}
+      source_artifact: ${{ steps.metadata.outputs.source_artifact }}
+
+    steps:
+      - name: Resolve dispatch metadata
+        id: metadata
+        shell: bash
+        env:
+          REQUESTED_DATE: ${{ inputs.date || '' }}
+          REQUESTED_MOCK: ${{ inputs.mock || false }}
+          REQUESTED_SEND_EMAIL: ${{ inputs.send_email || false }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED_DATE" ]; then
+            DISPATCH_DATE="$REQUESTED_DATE"
+          else
+            DISPATCH_DATE="$(TZ=Asia/Shanghai date +%F)"
+          fi
+
+          if ! [[ "$DISPATCH_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || \
+             [ "$(date -d "$DISPATCH_DATE" +%F 2>/dev/null || true)" != "$DISPATCH_DATE" ]; then
+            echo "Invalid dispatch date: $DISPATCH_DATE" >&2
+            exit 2
+          fi
+
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            MOCK="false"
+            SEND_EMAIL="true"
+          else
+            MOCK="$REQUESTED_MOCK"
+            SEND_EMAIL="$REQUESTED_SEND_EMAIL"
+          fi
+
+          SOURCE_ARTIFACT="dispatch-source-${DISPATCH_DATE}-${GITHUB_RUN_ID}"
+          echo "dispatch_date=$DISPATCH_DATE" >> "$GITHUB_OUTPUT"
+          echo "mock=$MOCK" >> "$GITHUB_OUTPUT"
+          echo "send_email=$SEND_EMAIL" >> "$GITHUB_OUTPUT"
+          echo "source_artifact=$SOURCE_ARTIFACT" >> "$GITHUB_OUTPUT"
+          echo "DISPATCH_DATE=$DISPATCH_DATE" >> "$GITHUB_ENV"
+          echo "DISPATCH_OUTPUT=data/${DISPATCH_DATE}_学术速递.md" >> "$GITHUB_ENV"
+          echo "date=$DISPATCH_DATE mock=$MOCK send_email=$SEND_EMAIL"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Generate mock Markdown
+        if: ${{ steps.metadata.outputs.mock == 'true' }}
+        run: python scripts/run_agent_command.py "$DISPATCH_DATE" --mock
+
+      - name: Run configured agent
+        if: ${{ steps.metadata.outputs.mock != 'true' }}
+        env:
+          AGENT_RUNNER_CMD: ${{ vars.AGENT_RUNNER_CMD || secrets.AGENT_RUNNER_CMD }}
+          AGENT_ENV_ALLOWLIST: ${{ vars.AGENT_ENV_ALLOWLIST }}
+          AGENT_PROVIDER_TOKEN: ${{ secrets.AGENT_PROVIDER_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/run_agent_command.py "$DISPATCH_DATE"
+
+      - name: Validate Markdown contract and links
+        run: >
+          python scripts/validate_dispatch.py "$DISPATCH_DATE"
+          --strict
+          --check-links
+          --report "data/${DISPATCH_DATE}_validation.json"
+
+      - name: Upload source evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.source_artifact || format('dispatch-source-failed-{0}', github.run_id) }}
+          if-no-files-found: warn
+          path: data/
+
+  deliver:
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DISPATCH_DATE: ${{ needs.generate.outputs.dispatch_date }}
+      TTS_VOICE: ${{ vars.TTS_VOICE || 'zh-CN-XiaoxiaoNeural' }}
+      TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
+
+    steps:
+      - name: Check out deterministic scripts
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download validated source
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.generate.outputs.source_artifact }}
+          path: data
+
+      - name: Verify downloaded Markdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "data/${DISPATCH_DATE}_学术速递.md"
+          test -s "data/${DISPATCH_DATE}_validation.json"
+          python scripts/validate_dispatch.py "$DISPATCH_DATE" --strict
+
+      - name: Generate TTS
+        run: python run_daily.py "$DISPATCH_DATE" --skip-email
+
+      - name: Send email
+        if: ${{ needs.generate.outputs.send_email == 'true' }}
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python scripts/push_email.py "$DISPATCH_DATE" --strict
+
+      - name: Upload final artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-${{ needs.generate.outputs.dispatch_date }}
+          if-no-files-found: warn
+          path: |
+            data/${{ needs.generate.outputs.dispatch_date }}_学术速递.md
+            data/${{ needs.generate.outputs.dispatch_date }}_学术播报.mp3
+            data/${{ needs.generate.outputs.dispatch_date }}_播报稿.txt
+            data/${{ needs.generate.outputs.dispatch_date }}_validation.json
+            data/${{ needs.generate.outputs.dispatch_date }}_agent.log
+            data/runs.log

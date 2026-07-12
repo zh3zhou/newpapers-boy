@@ -1,265 +1,132 @@
-# AGENTS.md —「会打岔的学术速递」Agent 执行手册
+# AGENTS.md —「会打岔的学术速递」Portable Agent Contract
 
-> 本文件是给 AI agent 的操作指南。如果你被指派运行「会打岔的学术速递」每日任务，**请严格按照本文件执行**。
-> 人类用户请读 README.md。
-
----
-
-## ⚡ 首次运行检测（每次执行任务前先检查！）
-
-在执行每日工作流之前，你**必须**首先检查项目根目录下是否存在 `.first_run_done` 标记文件。
-
-- **如果 `.first_run_done` 不存在**：说明这是用户第一次使用本项目。**不要直接执行每日工作流！** 请跳转到下方【🎉 首次配置向导】章节，引导用户完成配置。
-- **如果 `.first_run_done` 存在**：说明用户已完成初始配置，直接跳转到【每日工作流】章节正常执行。
+> 本文件是给任何 AI agent / agent runtime 的执行契约。人类用户请优先读 `README.md`。
+> 目标：让不同 agent 都能完成「采集与编辑」，让脚本和 CI 完成可重复的验证、TTS、邮件和证据留存。
 
 ---
 
-## 🎉 首次配置向导（仅首次运行时执行）
+## 0. 运行模式判定
+
+执行前先确定模式：
+
+- **CI / 非交互模式**：如果环境变量 `DISPATCH_MODE=ci`，不要执行首次配置向导，不要等待用户输入。读取 `AGENTS.md`、`config.md`，按 `DISPATCH_DATE` 和 `DISPATCH_OUTPUT` 生成 Markdown 后退出。验证、TTS、邮件、artifact 上传由脚本和 GitHub Actions 接管。
+- **本地交互模式**：如果不是 CI，先检查项目根目录是否存在 `.first_run_done`。
+  - 不存在：执行「首次配置向导」。
+  - 存在：执行「每日工作流」。
+
+交互式 agent 直接执行本文件即可，不要求用户另配 API Key 或 `AGENT_RUNNER_CMD`。只有 GitHub Actions 等无人值守调度器需要一个可非交互执行的 runner 及其凭据。
+
+任何模式都不要依赖对话历史；一切以当前仓库文件、环境变量和运行时可验证事实为准。
+
+---
+
+## 1. Agent 运行器契约
+
+GitHub Actions 或其他调度器通过 `AGENT_RUNNER_CMD` 调用 agent。该命令必须满足：
+
+- 从项目根目录执行。
+- 读取 `AGENTS.md` 和 `config.md`。
+- 根据当前日期和配置完成采集、筛选、中文摘要和 Markdown 写入。
+- 将 UTF-8 Markdown 写到 `DISPATCH_OUTPUT`。
+- 链接写入前必须验证可达；不可编造链接。
+- 成功时退出码为 `0`；失败时退出非零码。
+
+运行时会注入这些环境变量：
+
+```text
+DISPATCH_DATE=YYYY-MM-DD
+DISPATCH_OUTPUT=data/YYYY-MM-DD_学术速递.md
+DISPATCH_CONFIG=config.md
+PROJECT_ROOT=<repo root>
+DISPATCH_MODE=ci 或 local
+```
+
+非交互 agent 在 CI 中只负责生成 Markdown；不要发送邮件、不要改 GitHub secrets、不要把生成内容提交回仓库。
+
+`run_agent_command.py` 只向子进程传递基础系统环境、上述契约变量和 `AGENT_ENV_ALLOWLIST` 允许的 provider 凭据；`SMTP_*` 与 `MAIL_TO` 永远不作为环境变量传入。由于本地 agent 仍可能读取项目目录中的 `.env`，本地只运行可信 agent/命令。
+
+---
+
+## 2. 首次配置向导（仅本地交互模式）
 
 **开头第一句话必须说：「zh3zhou向你问问好，体验愉快！」**
 
-然后按以下步骤与用户对话，完成项目配置。一次问1-2个问题，不要一次性问完，保持对话节奏友好。
+一次问 1-2 个问题，按顺序完成：
 
-### 向导 Step 1：项目介绍
+1. 优先运行脱敏体检并读取结果，不要凭对话历史猜环境：
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\project_doctor.py --target manual --json
+   ```
+   如果 `.venv` 不存在，先运行 `.\setup.ps1`。介绍项目：每天搜集学术论文，穿插艺术和轻松内容，生成 Markdown 与 TTS 音频并通过邮件推送。
+2. 读取 `config.md` 第一节表格，询问是否调整学术领域、关键词和每日条数；需要时直接编辑该表格。
+3. 询问艺术方向偏好，更新 `config.md` 第三节「艺术方向偏好」。
+4. 询问每日运行时间。默认北京时间 07:00。
+5. 配置邮箱：引导用户填写 `.env` 中 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`MAIL_TO`。Gmail/QQ 使用应用专用密码或授权码。
+6. 可选配置 TTS：更新 `.env` 中 `TTS_VOICE` 和 `TTS_RATE`。
+7. 配置自动运行方式。默认推荐 GitHub Actions，但要先用平实语言解释：
+   - GitHub repo 是“这个项目在 GitHub 上的一份云端副本”；本地 `git remote -v` 可以查看它在哪里。
+   - GitHub Actions 是“GitHub 自带的定时任务机器”；它会每天拉取仓库代码运行 workflow。
+   - Secrets 是“只给 GitHub Actions 看的密码保险箱”，对应本地 `.env` 里的 SMTP 邮箱配置。
+   - Variables 是“普通配置项”，例如 `TTS_VOICE`、`TTS_RATE`、`AGENT_RUNNER_CMD`。
+   - `AGENT_RUNNER_CMD` 是“GitHub 到点后调用哪个 agent 来写 Markdown 的命令”；项目不能替用户猜测具体 agent。
+8. 优先尝试自动化 GitHub 配置诊断：
+   - 检查 `git remote -v` 是否有 GitHub repo。
+   - 检查是否安装 `gh`。如果没有，告诉用户安装：`winget install --id GitHub.cli`，然后运行 `gh auth login`。
+   - 默认先运行 `.\scripts\setup_github_actions.ps1 -CheckOnly`，只读诊断，不写 GitHub。
+   - 再运行 `scripts\project_doctor.py --target github-mock --require-email --json`，以 JSON 作为当前状态证据。
+   - 向用户汇报诊断结果：remote、GitHub 网络、`gh` 是否安装/登录、workflow 是否已提交、`.env` 是否有 SMTP/TTS、`AGENT_RUNNER_CMD` 是否缺失。
+   - 如果用户确认要配置且诊断允许，引导运行 `.\scripts\setup_github_actions.ps1`。该脚本会把 `.env` 中的 `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_TO` 写入 GitHub Secrets，把 `TTS_VOICE/TTS_RATE/AGENT_RUNNER_CMD` 写入 Variables，并可触发一次 mock workflow。
+   - 如果 `AGENT_RUNNER_CMD` 还没有确定，允许只配置邮件和 TTS，先跑 mock；真实定时运行会等用户选定 agent 命令后再启用。
+   - 没有真实 runner 时设置 `DISPATCH_ENABLED=false`。只有 runner 和凭据验证通过后，才允许改为 `true`。
+   - 如果用户选择暂不配置 GitHub 自动运行，进入「不配置也能用」说明，不要卡住流程。
+9. 检查环境：如 `.venv` 不存在，提示运行 `.\setup.ps1`；确保 `data/` 和 `archive/` 存在。
+10. 说明手动运行方式：
+   ```powershell
+   .\scripts\postprocess.ps1 2026-07-04
+   .\.venv\Scripts\python.exe run_daily.py 2026-07-04
+   ```
+11. 创建 `.first_run_done` 空文件，询问是否立即运行一次。
 
-向用户简要介绍这个项目：
-
-> 这是「会打岔的学术速递」——每天帮你自动搜集最新学术论文，用TTS合成新闻播报式语音，连同Markdown文字版一起发到你邮箱。学术内容中间还会穿插艺术作品和小段子，给大脑喘口气。
->
-> 我是你的值班编辑，接下来我会帮你完成几项简单配置，之后就能每天自动收到速递了。
-
-### 向导 Step 2：学术领域配置
-
-询问用户是否要调整关注的学术领域。展示当前默认配置（来自 config.md 第一节的表格），问用户：
-
-> 当前默认关注这4个领域（每领域3-5条/天）：
-> 1. 复杂系统
-> 2. AI4S / S4AI（AI for Science）
-> 3. AI 基础与大模型
-> 4. Agent / harness 工程
->
-> 你想调整吗？可以增删领域、修改关键词范围、调整每天条数。直接说「用默认的」也可以。
-
-根据用户回答，**直接编辑 config.md 第一节的表格**，增删改对应行。
-
-### 向导 Step 3：艺术方向偏好
-
-询问用户偏好的艺术方向：
-
-> 「打岔」板块每天会推荐一些艺术作品，默认方向是：艺术摄影、数字艺术、行为艺术、当代装置、插画。
->
-> 你有特别感兴趣的艺术方向吗？比如建筑、雕塑、动画、国画、书法、电影海报设计等等，都可以告诉我。没有特别偏好就说「随便」。
-
-根据用户回答，更新 config.md 第三节中艺术一刻的方向描述。
-
-### 向导 Step 4：自动运行时间
-
-询问用户希望每天几点收到速递：
-
-> 速递每天自动运行一次。默认是早上7:00（北京时间），这样你通勤路上就能听。
->
-> 你想改到其他时间吗？比如6:30、8:00、12:00、21:00都可以。直接说「用默认的」也行。
-
-记录用户期望的时间（小时H，分钟M），后续向导Step 7会用来设置定时任务。
-
-### 向导 Step 5：邮箱配置（重要！）
-
-邮件是推送的唯一默认通道，必须配置。推荐用户使用Gmail，但支持任意邮箱。
-
-> 接下来配置接收邮箱（也是发送邮箱）。我推荐用 **Gmail**，原因是：
-> - 支持SSL 465端口，稳定可靠
-> - 对第三方客户端支持好，不会轻易拦截
-> - 应用专用密码机制安全性高
->
-> 但你用QQ邮箱、Outlook、163邮箱等也没问题，我会帮你配置好对应的SMTP参数。
->
-> 请问你想用哪个邮箱？
-
-根据用户的邮箱域名（@后面的部分），按以下方式引导：
-
-**Gmail（@gmail.com）**：
-> Gmail需要「应用专用密码」而不是登录密码。请按以下步骤获取：
-> 1. 访问 https://myaccount.google.com/security
-> 2. 先开启「两步验证」（如果还没开）
-> 3. 搜索「应用专用密码」或在安全性页面底部找到
-> 4. 选择应用：邮件，设备：Windows计算机，点「生成」
-> 5. 把生成的16位密码告诉我（格式如 xxxx xxxx xxxx xxxx）
-
-**QQ邮箱（@qq.com / @foxmail.com）**：
-> QQ邮箱需要SMTP授权码（非QQ登录密码）。获取方式：
-> 1. 登录QQ邮箱网页版 https://mail.qq.com
-> 2. 点「设置」→「账户」
-> 3. 找到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」
-> 4. 开启「IMAP/SMTP服务」，按提示发送短信验证
-> 5. 验证通过后会显示16位授权码，把它告诉我
-
-**Outlook/Hotmail（@outlook.com / @hotmail.com / @live.com）**：
-> Outlook SMTP配置相对简单，直接用你的Microsoft账户密码即可（或应用密码如果开启了两步验证）。
-> SMTP服务器：smtp-mail.outlook.com，端口587（STARTTLS）。
-
-**其他邮箱（163/126/企业邮箱等）**：
-> 请告诉我你邮箱的SMTP服务器地址和端口号（通常可以在邮箱设置/帮助里找到「SMTP/POP3/IMAP」相关说明），以及邮箱密码或授权码。我会帮你配置并测试。
-
-收到用户提供的邮箱地址和密码/授权码后：
-1. 编辑 `.env` 文件，填入对应的 SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / MAIL_TO
-2. SMTP_PORT 根据邮箱类型设置：Gmail/QQ邮箱用465（SSL），Outlook用587（STARTTLS）
-3. 配置完成后，**运行 `.\.venv\Scripts\python.exe scripts\push_email.py 2026-06-30` 测试邮件能否发送成功**（使用已有测试数据）
-4. 如果发送失败，排查问题并引导用户检查授权码/密码
-
-### 向导 Step 6：TTS语音偏好（可选）
-
-> 语音播报默认用微软晓晓（zh-CN-XiaoxiaoNeural，自然女声，新闻播报风格）。
-> 想换声音吗？可选：
-> - 云希（zh-CN-YunxiNeural）：男，年轻活力
-> - 云健（zh-CN-YunjianNeural）：男，沉稳
-> - 晓伊（zh-CN-XiaoyiNeural）：女，甜美
->
-> 语速默认正常，想调快/调慢也可以说。
-
-根据用户回答更新 `.env` 中的 TTS_VOICE 和 TTS_RATE。
-
-### 向导 Step 7：设置定时任务
-
-> 我现在帮你创建定时任务，每天在你指定的时间自动运行。
-
-**尝试创建定时任务**：使用 Schedule 工具创建/更新定时任务：
-- `name`: 「会打岔的学术速递」
-- `cron_expression`: `M H * * *`（用用户在Step 4指定的时间，如果用户用默认就是 `0 7 * * *`）
-- `timezone`: `Asia/Shanghai`
-- `message`: 统一使用下方【定时任务message模板】中的内容
-- 如果已存在同名任务（ID: 5acfaa00），则用 update 更新
-
-**定时任务message模板**（每次创建/更新时都用这个，不要改）：
-```
-你是「会打岔的学术速递」值班编辑。请执行今日学术速递任务。
-
-【第一步：定位项目目录】
-你需要找到项目根目录（即包含 AGENTS.md 文件的目录）。从当前工作目录开始查找，如果当前目录没有 AGENTS.md，则搜索附近目录。
-
-【第二步：首次运行检测】
-检查项目根目录下是否存在 .first_run_done 标记文件。
-- 如果不存在：执行【首次配置向导】（见AGENTS.md）
-- 如果存在：继续下面步骤
-
-【第三步：读取核心文件】
-1. 读取 AGENTS.md —— 完整操作手册
-2. 读取 config.md —— 内容配置
-
-【第四步：执行工作流】
-严格按照 AGENTS.md 中「每日工作流」步骤执行：采集→生成Markdown→TTS→邮件→日志→摘要。
-不要依赖对话历史，一切以 AGENTS.md 和 config.md 为准。
-```
-
-**如果Schedule工具不可用/没有权限创建定时任务**，告知用户：
-> ⚠️ 抱歉，当前环境没有自动定时触发的权限。不过没关系，你仍然可以手动运行：
->
-> **手动运行方式**：
-> - 在TRAE中打开本项目，对我说「运行今天的学术速递」即可
-> - 或者在PowerShell中运行：
->   1. 先生成当日速递Markdown（告诉我「帮我生成今天的学术速递」）
->   2. 然后运行 `.\scripts\postprocess.ps1` 生成语音并推送邮件
->
-> 你也可以用Windows任务计划程序自行创建定时任务，在README.md里有说明。
-
-### 向导 Step 8：环境检查与初始化
-
-检查Python环境：
-- 如果 `.venv` 目录不存在，运行 `.\setup.ps1` 初始化虚拟环境并安装依赖
-- 确保 `data/` 和 `archive/` 目录存在
-
-### 向导 Step 9：手动运行说明（不管定时任务是否成功都告知）
-
-> 不管自动定时是否设置成功，你随时都可以手动触发：
->
-> **方式一（最简单）**：在TRAE里打开项目，直接跟我说「运行今天的学术速递」就行。
->
-> **方式二（PowerShell命令）**：
-> ```powershell
-> # 1. 先生成Markdown（或告诉我帮你生成）
-> # 2. 然后执行后处理：
-> .\scripts\postprocess.ps1              # 处理今天
-> .\scripts\postprocess.ps1 2026-07-01   # 处理指定日期
->
-> # 或者用Python统一入口：
-> .\.venv\Scripts\python.exe run_daily.py
-> ```
->
-> **方式三（分步执行）**：
-> ```powershell
-> .\.venv\Scripts\python.exe scripts\tts_generate.py   # 仅生成MP3
-> .\.venv\Scripts\python.exe scripts\push_email.py     # 仅发邮件
-> ```
-
-### 向导 Step 10：完成配置
-
-所有配置完成后：
-1. 在项目根目录创建 `.first_run_done` 文件（内容为空即可），标记首次配置已完成
-2. 向用户确认配置完成，询问是否要立即运行一次今天的速递试试
-3. 如果用户说「是」或「运行」，则执行完整的每日工作流（跳过归档检查，因为是第一次）
-
-> ✅ 配置完成！我已经帮你设置好了：
-> - 学术领域：{列出当前配置的领域}
-> - 艺术方向：{用户选择的方向}
-> - 运行时间：每天 {H}:{M}
-> - 接收邮箱：{邮箱地址}
-> - 语音：{选择的语音}
->
-> 要不要现在就运行一次，看看效果？
+不要在 CI 模式中创建 `.first_run_done` 或写 `.env`。
 
 ---
 
-## 你是谁
+## 3. 每日工作流
 
-你是「会打岔的学术速递」的值班编辑。你的工作是：搜集学术新内容 + 打岔趣味内容 → 生成 Markdown 简报 → 调用本地脚本生成语音播报 → 邮件推送给用户。
+### Step 0：确定日期和输出路径
 
----
+- 日期：优先用 `DISPATCH_DATE`；否则用用户指定日期；再否则用当天日期。
+- 输出：优先用 `DISPATCH_OUTPUT`；否则写入 `data/{YYYY-MM-DD}_学术速递.md`。
 
-## 开始前必读
+### Step 1：读取核心文件
 
-执行任何操作前，请先读取以下文件以了解配置：
+必须读取：
 
-1. **[config.md](config.md)** — 内容配置：关注哪些领域、每领域多少条、来源优先级、时效窗口、路径约定、艺术方向偏好。所有采集规则以此文件为准。
-2. **[.env](.env)**（若存在）— 环境配置：TTS语音、SMTP邮箱等（你不需要手动修改此文件，脚本会自动读取）。
+1. `config.md`：内容配置、领域、来源、时效、路径。
+2. `AGENTS.md`：本执行契约。
+3. 前一天 `data/{YYYY-MM-DD}_学术速递.md`（如果存在）：提取标题作为去重黑名单。
 
----
+### Step 2：采集内容
 
-## 每日工作流（严格按顺序执行）
+根据 `config.md` 第一节的学术领域表格，为每个领域独立采集近 24 小时内的新内容：
 
-### Step 0：确定日期
+- 来源优先级：arXiv、GitHub Trending、Hugging Face、Papers with Code、可信博客/技术报告/项目发布。
+- 每个领域按配置挑选最有价值或最有趣的内容。宁缺毋滥。
+- 24 小时内不足时可放宽到 48 小时，并在条目标题后标注 `(48h)`。
+- 打岔内容：
+  - 艺术一刻：2-3 条，可放宽到近期。
+  - 会心一笑：1-2 条，合规、不低俗、不涉敏感话题。
 
-使用当天日期，格式 `YYYY-MM-DD`。如果用户指定了日期则用指定日期。
+每条学术内容必须包含：
 
-### Step 1：历史去重
+- 英文原题或项目名。
+- 已验证可达的来源链接。
+- 一句话中文摘要。
+- 一句话「为什么值得看」。
 
-读取 `data/` 目录下**前一天**的速递 Markdown 文件（如果存在），提取其中已出现的论文/内容标题作为黑名单。今天采集的内容不得与前一天重复。
+### Step 3：写 Markdown
 
-前一天文件路径模式：`data/{YYYY-MM-DD}_学术速递.md`（将日期减1天）。
-
-### Step 2：并行采集内容
-
-根据 [config.md](config.md) 第一节定义的学术领域表格，为每个领域独立采集近 24 小时内的新内容：
-
-- **学术领域**：按表格中的每个领域，使用 WebSearch 检索 arXiv、GitHub Trending、Hugging Face、Papers with Code 等平台，每个领域挑选 3-5 条最有价值或最有趣的内容。
-- **打岔内容**：
-  - 艺术一刻：2-3 条，优先艺术摄影/数字艺术/行为艺术/当代装置/插画，附链接与简短中文介绍。
-  - 会心一笑：1-2 条，轻松幽默/冷知识/段子/有趣发现（合规、不低俗、不涉及敏感话题），不强求链接。
-
-**采集规则**：
-- 每条内容写入前用 WebFetch 验证链接可达，404/超时则剔除并补位。
-- 时效窗口默认近 24 小时；某领域 24h 内不足 3 条时可放宽到 48 小时补足，并在条目标题后标注 `(48h)`。
-- 艺术/幽默/打岔内容可放宽到「近期」以保证质量。
-- 宁缺毋滥：如果某领域当日确实无亮点，如实写「今日暂无亮点」，不要硬凑。
-- 链接务必真实可点击，**禁止编造链接**。
-
-每条学术内容需包含：
-- 标题（保留英文原文）
-- 来源链接（必须验证可达）
-- 一句话中文摘要
-- 一句话「为什么值得看 / 有意思在哪」
-
-### Step 3：生成 Markdown 文件
-
-将采集的内容按以下固定结构组织，写入 `data/{YYYY-MM-DD}_学术速递.md`：
+输出必须是 UTF-8，结构如下：
 
 ```markdown
 # 会打岔的学术速递 — YYYY-MM-DD
@@ -267,152 +134,173 @@
 > 一句话引言（可俏皮，20字以内）
 
 ## 一、{领域1名称}
-- **{论文标题}** — {来源，如 arXiv}
+- **{论文标题}** — {来源}
   摘要：{一句话中文摘要}
   为什么值得看：{一句话理由}
-  {链接}
+  https://example.com/source
 
 ## 二、{领域2名称}
-（同上格式）
-
-## 三、{领域3名称}
-（同上格式）
-
-## 四、{领域4名称}
-（同上格式）
+（同上）
 
 ## ✦ 今日打岔 ✦
 
 ### 艺术一刻
 - **{作品/新闻标题}** — {来源}
   简介：{简短中文介绍}
-  {链接}
+  https://example.com/art
 
 ### 会心一笑
-- {一段有趣的发现/段子/冷知识}
+- {一段有趣发现/段子/冷知识}
 ```
 
-**格式注意事项**：
-- 学术板块用 `## ` 二级标题，编号用中文「一、二、三、四」
-- 打岔板块固定为 `## ✦ 今日打岔 ✦`，其下用 `### ` 三级标题「艺术一刻」和「会心一笑」
-- 学术条目以 `- **` 开头，摘要和「为什么值得看」各占一行缩进
-- 中文为主，论文标题/专有名词/项目名保留英文原文
-- 文件编码 UTF-8，写入到 `data/` 目录下，路径由 config.md 第五节定义
+要求：
 
-### Step 4：调用 TTS 脚本生成语音播报
+- 学术板块用 `##`，标题名称来自 `config.md`。
+- 打岔板块标题必须包含「打岔」。
+- 艺术和幽默子板块用 `###`。
+- 学术/艺术条目以 `- **` 开头。
+- 摘要和「为什么值得看」各占一行并缩进。
+- 如果某领域确实无亮点，保留该领域标题，并写「今日暂无亮点」。
 
-运行后处理脚本，自动完成 TTS 语音合成和邮件推送：
+### Step 4：验证与后处理
 
-**Windows PowerShell**：
+本地交互模式可运行：
+
 ```powershell
-.\scripts\postprocess.ps1 {YYYY-MM-DD}
+.\.venv\Scripts\python.exe scripts\validate_dispatch.py YYYY-MM-DD --strict --check-links
+.\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD
 ```
 
-**或分步执行**：
-```powershell
-.\.venv\Scripts\python.exe scripts\tts_generate.py {YYYY-MM-DD}
-.\.venv\Scripts\python.exe scripts\push_email.py {YYYY-MM-DD}
+CI 模式由 GitHub Actions 自动运行：
+
+```bash
+python scripts/validate_dispatch.py "$DISPATCH_DATE" --strict --check-links
+python run_daily.py "$DISPATCH_DATE" --skip-email
+python scripts/push_email.py "$DISPATCH_DATE" --strict
 ```
 
-脚本会自动：
-1. 读取 `data/{YYYY-MM-DD}_学术速递.md`
-2. 调用 edge-tts 生成新闻播报风格 MP3 → `data/{YYYY-MM-DD}_学术播报.mp3`
-3. 同时输出朗读稿文本 → `data/{YYYY-MM-DD}_播报稿.txt`
-4. 通过 SMTP 发送邮件（HTML 正文 + MP3 附件）到 config.md/.env 中配置的邮箱
+### Step 5：日志和摘要
 
-**注意**：
-- 如果 `.venv` 不存在，提醒用户先运行 `.\setup.ps1` 初始化环境。
-- 如果脚本报错 SMTP 未配置，提醒用户检查 `.env` 文件中的 SMTP_PASS。
+本地交互模式运行后，在 `data/runs.log` 追加制表符分隔记录：
 
-### Step 5：写运行日志
-
-在 `data/runs.log` 文件末尾追加一行（制表符分隔）：
-
-```
+```text
 {日期}\t{时间}\t{学术总条数}\t{艺术条数}\t{幽默条数}\t{48h降级条数}\t{剔除数}\t{状态ok/fail}\t{Markdown文件绝对路径}
 ```
 
-### Step 6：会话推送摘要
+会话里只返回摘要，不粘贴全文：
 
-**不要**在会话中粘贴完整 Markdown 全文。只返回：
-
-1. 当日速递一句话总览：今日共收录 X 篇学术 + Y 条艺术 + Z 则幽默。
-2. 每个学术领域最值得看的一条（标题 + 一句话理由）。
-3. 今日「打岔」亮点一句话。
-4. 邮件发送状态（成功/失败）。
-5. 保存的文件路径。
+1. 今日共收录 X 篇学术 + Y 条艺术 + Z 则幽默。
+2. 每个领域最值得看的一条。
+3. 今日打岔亮点。
+4. 邮件发送状态。
+5. 保存路径。
 
 ---
 
-## 月度归档（每月1号额外执行）
+## 4. GitHub Actions 适配
 
-如果当天是某月1号，在 Step 1 之前先执行归档：
-- 将 `data/` 目录中上一个月的所有 `YYYY-MM-DD_学术速递.md` 和 `YYYY-MM-DD_学术播报.mp3` 移动到 `archive/YYYY-MM/` 目录下（YYYY-MM 为上个月）。
-- 例如：4月1号运行时，把 `data/2026-03-*` 移到 `archive/2026-03/`。
+`.github/workflows/daily-dispatch.yml` 是默认 CI 调度器：
 
----
+- 定时：UTC `0 23 * * *`，对应北京时间 07:00。
+- 手动：`workflow_dispatch` 可指定日期、mock 模式、是否发送邮件。
+- `DISPATCH_ENABLED` 不是 `true` 时，schedule 安全跳过；手动 mock 模式仍可运行。
+- 开启定时后，如果 `AGENT_RUNNER_CMD` 未配置，生成阶段会失败并提示配置。
+- generate job 不持有 SMTP；deliver job 重新下载并验证产物，SMTP 只进入邮件步骤。
+- 生成物作为 Actions artifacts 保存，不提交回仓库。
 
-## 目录结构速查
+推荐 GitHub 配置：
 
-```
-项目根目录/
-├── AGENTS.md          ← AI agent操作手册（你正在读的文件）
-├── README.md          ← 人类用户读的手册
-├── TECH_REPORT.md     ← 技术架构文档（调试时参考）
-├── config.md          ← 内容配置（领域、条数、时效、艺术偏好）
-├── run_daily.py       ← Python统一入口（TTS+推送）
-├── .first_run_done    ← 首次配置完成标记（本地生成，不入Git）
-├── .env               ← 本地私有配置（TTS语音、SMTP邮箱，不入Git）
-├── .env.example       ← .env 模板
-├── .gitignore
-├── requirements.txt   ← Python依赖
-├── setup.ps1          ← 一键初始化环境
-├── scripts/
-│   ├── postprocess.ps1    ← PowerShell一键后处理（TTS+推送）
-│   ├── tts_generate.py   ← Markdown → MP3语音播报
-│   └── push_email.py     ← 邮件推送（HTML正文+MP3附件）
-├── data/              ← 每日输出（Markdown/MP3/日志，不入Git）
-│   ├── YYYY-MM-DD_学术速递.md
-│   ├── YYYY-MM-DD_学术播报.mp3
-│   ├── YYYY-MM-DD_播报稿.txt
-│   └── runs.log
-└── archive/           ← 月度归档（不入Git）
-    └── YYYY-MM/
+- Repository variable 或 secret：`AGENT_RUNNER_CMD`
+- Repository variable：`DISPATCH_ENABLED`，没有真实 runner 时保持 `false`
+- 可选 Repository variable：`AGENT_ENV_ALLOWLIST`
+- Secrets：`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`MAIL_TO`
+- 可选：`TTS_VOICE`、`TTS_RATE`、agent provider API keys
+
+小白优先使用自动化脚本：
+
+```powershell
+.\scripts\setup_github_actions.ps1 -CheckOnly
+.\scripts\setup_github_actions.ps1
 ```
 
+`-CheckOnly` 只诊断，不写 GitHub。正式配置脚本会从 `.env` 搬运 SMTP/TTS 配置，并提示用户补充 `AGENT_RUNNER_CMD`。如果没有安装 `gh`，先指导用户运行 `winget install --id GitHub.cli` 和 `gh auth login`。
+
+已获得用户明确授权时，agent 可使用非交互模式：
+
+```powershell
+.\scripts\setup_github_actions.ps1 -NonInteractive -ConfirmWrite -TriggerMock -SendEmailMock
+```
+
+缺少 `-ConfirmWrite` 时禁止非交互写入。只有传入真实 runner 并加 `-EnableSchedule` 才开启定时。
+
+如果用户选择不配置 GitHub 自动运行，必须告诉用户仍可这样使用：
+
+1. 直接让 agent 跑一次：
+   ```text
+   请读取 AGENTS.md 和 config.md，运行今天的学术速递。
+   ```
+2. 已有 Markdown 后手动后处理：
+   ```powershell
+   .\.venv\Scripts\python.exe scripts\validate_dispatch.py YYYY-MM-DD --strict --check-links
+   .\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD
+   ```
+3. 只生成音频不发邮件：
+   ```powershell
+   .\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD --skip-email
+   ```
+4. 以后随时再配置 GitHub：
+   ```powershell
+   .\scripts\setup_github_actions.ps1 -CheckOnly
+   .\scripts\setup_github_actions.ps1
+   ```
+
 ---
 
-## 验证清单（执行完后自检）
+## 5. 月度归档
 
-- [ ] 所有学术领域都有内容（3-5条，或注明「今日暂无亮点」）
+如果本地交互模式运行日期是每月 1 号，在采集前将上个月的 `data/YYYY-MM-*` Markdown、MP3 和朗读稿移动到 `archive/YYYY-MM/`。
+
+CI artifact 模式默认不移动历史内容，因为仓库里的 `data/` 只保留 `.gitkeep`，每日输出保存在 Actions artifacts 中。
+
+---
+
+## 6. 验证清单
+
+- [ ] 已读取 `AGENTS.md` 和 `config.md`
+- [ ] 日期和输出路径正确
+- [ ] 所有配置领域都出现，或注明「今日暂无亮点」
+- [ ] 每个学术条目有摘要、为什么值得看、真实链接
 - [ ] 打岔板块包含艺术一刻和会心一笑
-- [ ] 每个链接都已验证可达（WebFetch通过）
-- [ ] 与前一天内容无重复
-- [ ] Markdown 文件已保存到正确路径 `data/{date}_学术速递.md`
-- [ ] 后处理脚本执行成功，MP3 已生成
-- [ ] 邮件发送成功（或明确报告失败原因）
-- [ ] runs.log 已追加当日记录
-- [ ] 会话中只返回摘要，未粘贴全文
+- [ ] 与前一天标题去重
+- [ ] `scripts/validate_dispatch.py YYYY-MM-DD --strict --check-links` 通过
+- [ ] TTS 和邮件结果由脚本或 CI 明确报告
+- [ ] 未泄露 `.env`、API key、邮箱授权码或私有生成内容
 
 ---
 
-## 任务续期提醒
+## 7. 为什么这是面向 agent 的项目
 
-本任务的 Schedule 定时任务过期日为 **2026-12-25**。从 2026-12-01 起，每次会话推送末尾追加一行提醒：
-「⚠️ 任务将于 2026-12-25 过期，请用 Schedule action: update 续期。」
+- 人类意图在 `config.md`：关注领域、偏好、输出约定。
+- Agent 契约在 `AGENTS.md`：如何采集、判断、写入、失败。
+- 可重复步骤在脚本：验证、TTS、邮件、artifact。
+- 证据在输出文件、验证报告、agent log、Actions artifact 和邮件结果。
+- 平台适配在外层：GitHub Actions、本机计划任务或任意 agent runtime 都只需遵守同一契约。
 
 ---
 
-## 常见问题
+## 8. 常见问题
 
-**Q：Python 虚拟环境不存在怎么办？**
-A：提醒用户在项目根目录运行 `.\setup.ps1`。
+**Q：CI 里没有 `.first_run_done` 怎么办？**
+A：`DISPATCH_MODE=ci` 时跳过首次向导。
 
-**Q：邮件发送失败？**
-A：检查 `.env` 中 SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_TO 是否正确填写。Gmail 需要「应用专用密码」而非登录密码。
+**Q：`AGENT_RUNNER_CMD` 应该写什么？**
+A：写你实际使用的 agent CLI 或脚本命令。它只需要读 `AGENTS.md/config.md` 并写出 `DISPATCH_OUTPUT`，项目不绑定供应商。
 
-**Q：用户想换关注领域怎么办？**
-A：编辑 [config.md](config.md) 第一节的表格即可，增删行都行，TTS 解析器会自动适配。
+**Q：没有 API Key 能不能用？**
+A：交互式 agent 可以直接按本文件手动运行；GitHub 无人值守真生成必须有 runner 和对应凭据。没有 runner 时保持 `DISPATCH_ENABLED=false`，仍可手动 mock。
 
-**Q：TTS 语音/语速想换？**
-A：修改 `.env` 中的 TTS_VOICE 和 TTS_RATE。
+**Q：邮件失败是否会让 CI 失败？**
+A：定时任务使用 `--strict-email`，邮件失败会失败；手动 mock 可选择不发送邮件。
+
+**Q：本地 `.venv` 坏了怎么办？**
+A：重新安装 Python 后运行 `.\setup.ps1`。CI 使用 `actions/setup-python`，不依赖本地 `.venv`。

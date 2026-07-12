@@ -26,7 +26,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import edge_tts
+from env_utils import load_env
 
 WORK_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = WORK_DIR / "data"
@@ -40,19 +40,6 @@ HUMOR_KEYWORDS = ("笑", "幽默", "趣味", "冷知识", "趣闻", "段子", "h
 
 def ensure_data_dir():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def load_env():
-    env_path = WORK_DIR / ".env"
-    env = {}
-    if env_path.exists():
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            env[k.strip()] = v.strip().strip('"').strip("'")
-    return env
 
 
 def clean_text(s: str) -> str:
@@ -321,13 +308,15 @@ def build_broadcast_text(parsed: dict) -> str:
 
 
 async def synthesize(text: str, output_path: Path, voice: str, rate: str):
+    import edge_tts
+
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(str(output_path))
 
 
 def main():
     ensure_data_dir()
-    env = load_env()
+    env = load_env(WORK_DIR)
     voice = env.get("TTS_VOICE", DEFAULT_VOICE)
     rate = env.get("TTS_RATE", DEFAULT_RATE)
 
@@ -362,6 +351,8 @@ def main():
     print(f"[INFO] 朗读稿字数: {len(broadcast_text)}")
     print(f"[INFO] 输出 MP3: {out_path}")
 
+    if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(synthesize(broadcast_text, out_path, voice, rate))
     print(f"[OK] 播报音频已生成: {out_path}")
     file_size = out_path.stat().st_size

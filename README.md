@@ -1,34 +1,12 @@
-# 📰 会打岔的学术速递
+# 会打岔的学术速递
 
-每天一份，自动筛论文、生成语音播报，并把 Markdown + MP3 发到你的邮箱。
+每天搜集学术内容，穿插艺术和轻松内容，生成 Markdown、中文语音和邮件。Agent 负责研究与编辑，脚本负责结构验证、链接检查、TTS、邮件和运行证据。
 
-这是一个明显偏 **agent-first** 的项目：你可以把它当成个人学术编辑部，也可以直接让你的 agent 读取 `AGENTS.md`、`config.md` 和相关脚本，自行完成采集、生成、播报和推送。学术内容之外，它还会插播一点艺术和轻松内容，让信息流不那么板着脸。
+项目不绑定某个 IDE 或 agent 平台：人类偏好在 `config.md`，agent 契约在 `AGENTS.md`，可重复步骤在 `scripts/`，运行结果在本地 `data/` 或 GitHub Actions artifacts。
 
-## 定位
+## 快速开始
 
-- 面向研究者、技术爱好者和喜欢自动化工作流的人
-- 用 agent 负责采集与整理，用脚本负责 TTS 和邮件推送
-- 输出既可读，也可听，适合通勤、散步或低注意力场景
-
-## 亮点
-
-- 🎯 **多领域并行采集**：arXiv / GitHub Trending / HuggingFace / Papers with Code，按你配置的领域并行检索
-- 🤖 **Agent 友好工作流**：核心流程写在 `AGENTS.md`，适合直接交给 agent 执行
-- 🎙️ **语音播报**：微软 Edge TTS 生成新闻播报风格 MP3，中文女声，语速可调
-- 📧 **邮件推送**：Markdown 正文 + MP3 附件发到你邮箱，手机邮箱 App 直接听
-- 🎨 **打岔内容**：艺术一刻（摄影/装置/数字艺术）+ 会心一笑（冷知识/段子）
-- ⚙️ **零代码定制**：改 `config.md` 就能换领域、调条数；改 `.env` 就能换语音、换邮箱
-- 🕐 **可配定时任务**：配合 TRAE Work Schedule 每天自动运行
-
-## 3 步上手
-
-### 环境要求
-
-- Windows（PowerShell）—— 脚本以 `.ps1` 为主，核心 Python 脚本可跨平台
-- Python 3.9+
-- 一个能收邮件的邮箱（推荐 Gmail）
-
-### 1. 克隆并安装
+Windows PowerShell：
 
 ```powershell
 git clone <your-repo-url>
@@ -36,186 +14,219 @@ cd <repo-dir>
 .\setup.ps1
 ```
 
-`setup.ps1` 会自动：检测 Python → 创建虚拟环境 `.venv` → 安装依赖 → 复制 `.env.example` 为 `.env`。
+`setup.ps1` 会创建 `.venv`、安装依赖、准备 `.env`，最后运行本地体检。Windows 优先使用 `py`；即使系统的 `python` 是无效 WindowsApps 别名，也会明确报告。
 
-### 2. 选择使用方式
+Linux/macOS：
 
-你有两种启动姿势：
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/project_doctor.py --target manual
+```
 
-- **直接手动跑脚本**：自己准备或生成 `data/YYYY-MM-DD_学术速递.md`，再执行后处理
-- **直接让你的 agent 处理一切**：让 agent 先读取 `AGENTS.md`、`config.md` 和 `README.md`，再按文档执行完整工作流
+然后在项目目录对任意有文件、终端和联网能力的 agent 说：
 
-如果你要把这个项目交给 agent，推荐它至少先读这几个文件：
+```text
+请读取 AGENTS.md 和 config.md，运行今天的学术速递。
+```
 
-- `AGENTS.md`
-- `config.md`
-- `README.md`
-- `scripts/postprocess.ps1`
+交互式 agent 会直接完成研究和 Markdown 生成，不需要再填写 `AGENT_RUNNER_CMD` 或单独的 API Key。是否能联网、写文件和运行命令，仍取决于该 agent 当前会话的能力与权限。
 
-### 3. 配置邮箱并运行
+## 邮件和语音
 
-编辑 `.env` 文件，填写你的邮箱 SMTP 信息：
-
-**Gmail（推荐）**：
+本地配置写在不会提交的 `.env`：
 
 ```env
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_USER=your-name@gmail.com
-SMTP_PASS=你的16位应用专用密码
+SMTP_PASS=your-app-password
 MAIL_TO=your-name@gmail.com
+
+TTS_VOICE=zh-CN-XiaoxiaoNeural
+TTS_RATE=+0%
 ```
 
-> Gmail 需要先开启「两步验证」，然后创建「应用专用密码」：
-> https://myaccount.google.com/security → 安全性 → 两步验证 → 应用专用密码
+Gmail 使用应用专用密码，QQ 邮箱使用 SMTP 授权码。只生成 Markdown 或音频时，邮箱可以暂不配置。
 
-**QQ 邮箱**：
-
-```env
-SMTP_HOST=smtp.qq.com
-SMTP_PORT=465
-SMTP_USER=你的QQ号@qq.com
-SMTP_PASS=QQ邮箱授权码（非登录密码）
-MAIL_TO=你的QQ号@qq.com
-```
-
-> QQ 邮箱授权码获取：QQ邮箱网页版 → 设置 → 账户 → IMAP/SMTP服务 → 开启 → 生成授权码
-
-**Outlook/Hotmail**：
-
-```env
-SMTP_HOST=smtp-mail.outlook.com
-SMTP_PORT=587
-SMTP_USER=your-name@outlook.com
-SMTP_PASS=你的密码
-MAIL_TO=your-name@outlook.com
-```
-
-### 4. 生成当日速递
-
-项目的核心流程是**在 TRAE Work 中让 AI 执行采集**（见下文"完整工作流"），后处理部分（TTS + 邮件推送）可以一键运行：
+检查本地状态：
 
 ```powershell
-.\scripts\postprocess.ps1              # 处理今天
-.\scripts\postprocess.ps1 2026-06-30   # 处理指定日期
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target manual
 ```
 
-前提：`data/` 目录下已有 `YYYY-MM-DD_学术速递.md`（由 AI 采集生成）。
+## 两种 Agent 模式
 
-也可以分步执行：
+| 模式 | 是否额外需要 runner/API | 用途 |
+| --- | --- | --- |
+| 交互式运行 | 通常不需要 | 在 Codex、其他 IDE agent 或终端 agent 中手动说“运行今天的速递” |
+| 无人值守定时 | 需要 | GitHub Actions 到点后必须有可非交互执行的 `AGENT_RUNNER_CMD` 及其凭据 |
 
-```powershell
-.\.venv\Scripts\python.exe scripts\tts_generate.py 2026-06-30   # 仅生成 MP3
-.\.venv\Scripts\python.exe scripts\push_email.py 2026-06-30     # 仅发邮件
+GitHub 云端机器不能继承你在本机 Codex 或其他桌面 agent 中的登录。没有真实 runner 时，项目会保持 `DISPATCH_ENABLED=false`，定时事件安全跳过；手动 mock 不受影响。
+
+### Agent 命令契约
+
+任何命令只要读取 `AGENTS.md`、`config.md`，并把 UTF-8 Markdown 写到 `DISPATCH_OUTPUT`，都可以成为 `AGENT_RUNNER_CMD`。
+
+运行时注入：
+
+```text
+DISPATCH_DATE=YYYY-MM-DD
+DISPATCH_OUTPUT=data/YYYY-MM-DD_学术速递.md
+DISPATCH_CONFIG=config.md
+PROJECT_ROOT=<repo root>
+DISPATCH_MODE=ci 或 local
 ```
 
-## 自定义配置
+`run_agent_command.py` 使用本次临时输出，验证非空 UTF-8 后才替换正式文件，旧文件不能冒充本次成功。子进程只获得基础系统环境、上述契约和允许的 provider 凭据，不会获得 `SMTP_*` 或 `MAIL_TO` 环境变量。
 
-### 换关注领域
-
-编辑 [config.md](config.md) 第一节的表格，增删行即可。例如添加计算神经科学：
-
-```markdown
-| 5 | 计算神经科学 | computational neuroscience / spiking neural networks | 2-3 |
-```
-
-领域名可以自由命名，TTS 播报会自动识别，无需改代码。
-
-### 调整每领域论文数量
-
-同样在 [config.md](config.md) 的表格中修改「每日条数」列，例如 `3-5` → `5-8`。
-
-### 换 TTS 语音
-
-编辑 `.env`：
+可选配置：
 
 ```env
-TTS_VOICE=zh-CN-YunxiNeural    # 换男声
-TTS_RATE=+10%                  # 略快
+AGENT_RUNNER_CMD=python scripts/my_agent_adapter.py
+AGENT_ENV_ALLOWLIST=MY_PROVIDER_KEY
+AGENT_TIMEOUT_SECONDS=1800
 ```
 
-可选中文语音：
+本地 runner 仍能读取项目目录里的 `.env` 文件，因此只应运行可信 agent/命令。GitHub 的 generate job 中不存在本地 `.env`，邮件 Secrets 只注入独立的发送步骤。
 
-| Voice | 风格 |
-|-------|------|
-| `zh-CN-XiaoxiaoNeural` | 晓晓，女，自然，默认推荐 |
-| `zh-CN-YunxiNeural` | 云希，男，年轻活力 |
-| `zh-CN-YunjianNeural` | 云健，男，沉稳新闻腔 |
-| `zh-CN-XiaoyiNeural` | 晓伊，女，甜美 |
+## GitHub Actions
 
-### 换推送邮箱
+`.github/workflows/daily-dispatch.yml` 每天 UTC `23:00` 触发，对应北京时间 `07:00`。流程分为：
 
-编辑 `.env` 的 `SMTP_*` 和 `MAIL_TO` 字段即可。支持任何支持 SMTP 的邮箱服务。
+1. `generate`：agent/mock 生成 Markdown，执行严格结构和链接检查，上传 source evidence。
+2. `deliver`：重新下载并验证 Markdown，生成 MP3，可选发送邮件，上传最终 artifacts。
 
-### 启用其他推送通道（可选）
+SMTP Secrets 只进入 `deliver` 的邮件步骤，生成 agent 看不到它们。
 
-默认只走邮件。如需 Bark（iOS）、Server酱（微信）、飞书 Webhook：
+### 小白解释
 
-1. 打开 `scripts/push_email.py`
-2. 找到底部"可选推送通道"注释区域，取消对应函数的注释
-3. 在 `main()` 中取消对应调用行的注释
-4. 在 `.env` 中填入对应配置项（见 `.env.example` 注释）
+- GitHub repo：项目在 GitHub 上的云端副本。
+- Actions：GitHub 提供的定时任务机器。
+- Secrets：邮箱授权码、API Key 等密码保险箱。
+- Variables：语音、开关、agent 命令等普通配置。
+- Artifacts：每次运行保存的 Markdown、MP3、报告和日志。
 
-> ⚠️ 注意：微信服务号、Bark、飞书 Webhook 均**不支持 MP3 附件**，只能推送文字摘要。邮件是唯一能在手机上直接收到音频的通道。
+### 自动诊断和配置
 
-## 完整工作流（在 TRAE Work 中执行）
+先运行只读检查：
 
-每日速递的完整生成流程是：
-
-1. **初始化**：读取 `config.md`、读取前一日速递做去重参考
-2. **并行采集**：针对 config 中的每个领域，AI 通过 WebSearch/WebFetch 检索 arXiv、GitHub Trending 等来源
-3. **聚合去重**：跨领域合并、与历史比对去重
-4. **链接验证**：确保论文链接可访问
-5. **Markdown 生成**：按约定格式写入 `data/YYYY-MM-DD_学术速递.md`
-6. **后处理**：运行 `postprocess.ps1` 生成 TTS 音频 + 发送邮件
-7. **日志记录**：追加到 `data/runs.log`
-
-在 TRAE Work 中，可以把这个流程配置为每日定时任务（Schedule）。
-
-## 目录结构
-
+```powershell
+.\scripts\setup_github_actions.ps1 -CheckOnly
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target github-mock --require-email
 ```
+
+如果未安装 GitHub CLI：
+
+```powershell
+winget install --id GitHub.cli
+gh auth login
+```
+
+安装后若当前 PowerShell 仍找不到 `gh`，重新打开终端；配置脚本也会自动查找常见安装路径。
+
+workflow 必须先提交并 push 到默认分支。随后运行：
+
+```powershell
+.\scripts\setup_github_actions.ps1
+```
+
+它会在用户确认后把本地 SMTP 项写入 GitHub Secrets，把 TTS、`AGENT_RUNNER_CMD` 和 `DISPATCH_ENABLED` 写入 Variables，并可触发 mock。
+
+已明确授权 agent 代为配置时，可用显式非交互模式：
+
+```powershell
+.\scripts\setup_github_actions.ps1 `
+  -NonInteractive -ConfirmWrite -TriggerMock -SendEmailMock
+```
+
+非交互写入缺少 `-ConfirmWrite` 会直接失败。没有 `AGENT_RUNNER_CMD` 时，脚本写入 `DISPATCH_ENABLED=false`；只有同时传入真实命令和 `-EnableSchedule` 才会开启定时。
+
+### GitHub 配置映射
+
+| 名称 | 类型 | 来源/用途 |
+| --- | --- | --- |
+| `SMTP_HOST/PORT/USER/PASS`、`MAIL_TO` | Secret | 对应本地 `.env` 邮件配置 |
+| `TTS_VOICE`、`TTS_RATE` | Variable | 播报声音和语速 |
+| `AGENT_RUNNER_CMD` | Variable 或 Secret | 无人值守 agent 命令 |
+| `AGENT_ENV_ALLOWLIST` | Variable | 额外允许传给 agent 的 provider 环境变量名 |
+| `DISPATCH_ENABLED` | Variable | `true` 才允许 schedule 真跑 |
+| provider key | Secret | 例如 `OPENAI_API_KEY` 或 `AGENT_PROVIDER_TOKEN` |
+
+手动 smoke：在 Actions 页面运行 `Daily Academic Dispatch`，选择 `mock=true`；`send_email=true` 会同时验证 TTS 和邮件。
+
+三个就绪状态：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target manual
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target github-mock --require-email
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target github-scheduled
+```
+
+`github-scheduled=disabled` 表示定时开关尚未开启，是没有真实 runner 时的正常状态。
+
+## 不配置 GitHub 也能用
+
+直接让 agent 跑一次：
+
+```text
+请读取 AGENTS.md 和 config.md，运行今天的学术速递。
+```
+
+已有 Markdown 后验证、生成音频并发邮件：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_dispatch.py YYYY-MM-DD --strict --check-links
+.\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD
+```
+
+只生成音频：
+
+```powershell
+.\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD --skip-email
+```
+
+以后再配置 GitHub：
+
+```powershell
+.\scripts\setup_github_actions.ps1 -CheckOnly
+.\scripts\setup_github_actions.ps1
+```
+
+## 自定义与目录
+
+编辑 `config.md` 第一节修改学术领域、关键词和条数；编辑第三节修改艺术偏好。修改 `.env` 的 `TTS_VOICE/TTS_RATE` 可更换语音和语速。
+
+```text
 academic-dispatch/
-├── config.md                 # 内容配置（领域/条数/来源/路径）
-├── .env.example              # 环境变量模板（提交到Git）
-├── .env                      # 你的私有配置（不提交）
-├── .gitignore
-├── requirements.txt          # Python依赖
-├── setup.ps1                 # 一键安装脚本
-├── README.md                 # 本文件
-├── TECH_REPORT.md            # 技术架构文档（给Agent/开发者）
+├── AGENTS.md                       # 平台无关 agent 契约
+├── config.md                       # 人类内容偏好
+├── .github/workflows/
+│   └── daily-dispatch.yml          # 隔离的生成/交付流程
 ├── scripts/
-│   ├── tts_generate.py       # Markdown → MP3语音播报
-│   ├── push_email.py         # SMTP邮件推送（含MP3附件）
-│   └── postprocess.ps1       # 一键后处理（TTS+邮件）
-├── data/                     # 每日输出（gitignored）
-│   ├── .gitkeep
-│   ├── YYYY-MM-DD_学术速递.md
-│   ├── YYYY-MM-DD_学术播报.mp3
-│   └── runs.log
-└── archive/                  # 月度归档（gitignored）
-    └── .gitkeep
+│   ├── project_doctor.py           # 三种目标的脱敏体检
+│   ├── run_agent_command.py        # 通用 agent 命令适配
+│   ├── validate_dispatch.py        # 结构、链接和 JSON 报告
+│   ├── setup_github_actions.ps1    # GitHub 配置向导
+│   ├── tts_generate.py             # Markdown 到 MP3
+│   └── push_email.py               # SMTP 邮件
+├── run_daily.py                    # 后处理入口
+├── tests/                          # unittest 单元/集成测试
+├── data/                           # 本地生成物，不入 Git
+└── archive/                        # 本地归档，不入 Git
 ```
 
-## 隐私说明
+## 隐私与测试
 
-- `.env` 包含你的邮箱授权码，**永远不要提交到 Git**
-- `data/` 目录下的每日速递和音频是你的个人内容，默认不入库
-- 提交到 GitHub 的只有代码、配置模板和文档
+- `.env`、`data/`、`archive/` 默认不提交。
+- GitHub artifacts 可能包含生成内容，不要在简报中写秘密。
+- 邮箱授权码和 API Key 只放 `.env` 或 GitHub Secrets。
+- URL 检查拒绝 localhost、私网、link-local 和保留地址；404/410 失败，403/429/临时网络错误记为 warning。
 
-## 常见问题
-
-**Q: Gmail 发信失败提示"Username and Password not accepted"？**
-A: 你填的是 Gmail 登录密码而不是应用专用密码。开启两步验证后重新生成16位应用密码。
-
-**Q: TTS 生成的音频听起来不自然/有些论文被跳过？**
-A: 每篇论文摘要会被 `smart_truncate()` 在标点处智能截断到约150字，避免超长。想听到更多内容，编辑 `tts_generate.py` 中 `smart_truncate(summary, 150)` 的 `150` 改为更大数字。
-
-**Q: 想改开场白/结束语？**
-A: 编辑 `scripts/tts_generate.py` 的 `build_broadcast_text()` 函数，修改 `sentences.append(...)` 中的句子。
-
-**Q: 如何在 Linux/Mac 上使用？**
-A: Python 脚本跨平台，直接用 `python3 scripts/tts_generate.py` 和 `python3 scripts/push_email.py` 即可。`setup.ps1` 和 `postprocess.ps1` 是 Windows PowerShell 脚本，Linux/Mac 用户可自行编写对应的 bash 脚本（核心命令相同）。
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe scripts\validate_dispatch.py 2026-07-04 --strict --check-links
+```
 
 ## License
 

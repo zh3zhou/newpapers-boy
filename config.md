@@ -106,8 +106,10 @@
 | 播报开场白/结束语 | `scripts/tts_generate.py` | 修改 `build_broadcast_text()` 中的句子 |
 | 摘要截断长度 | `scripts/tts_generate.py` | 修改 `smart_truncate()` 调用中的数字参数 |
 
-## 十、任务续期提醒
+## 十、调度器说明
 
-- Schedule 任务过期日：`2026-12-25`
-- 提醒阈值：`2026-12-01` 起，每日会话推送末尾追加一行提醒
-  「⚠️ 任务将于 2026-12-25 过期，请用 Schedule action: update 续期。」
+- 默认调度器：GitHub Actions，见 `.github/workflows/daily-dispatch.yml`
+- 默认时间：北京时间 07:00（UTC `0 23 * * *`）
+- Agent 接入：通过 `AGENT_RUNNER_CMD` 配置，不绑定具体 agent 平台
+- 定时开关：GitHub Variable `DISPATCH_ENABLED=true` 才执行 schedule；没有真实 runner 时保持 `false`
+- 输出留存：GitHub Actions artifacts；本地运行时写入 `data/`
