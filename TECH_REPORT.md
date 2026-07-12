@@ -24,6 +24,8 @@ GitHub Actions artifacts / 本地 data/
 
 调度适配分为两类：GitHub Actions 在云端调用非交互 provider，需要独立凭据；Codex 等桌面 runtime 若提供原生 automation，可复用用户已有登录在本机定时启动 agent。二者共享 `AGENTS.md/config.md` 和确定性后处理，但运行可用性与凭据边界不同，默认禁止同时启用以避免重复邮件。
 
+对于仓库未预置的 agent 产品，`RUNTIME_ADAPTERS.md` 定义运行时发现流程：以当前会话工具、本机 CLI 帮助、官方文档和官方仓库为证据，确认调度、授权、后台条件、权限、日志和费用。适配结论是运行时事实，不写死为跨产品假设。
+
 核心原则：
 
 - Agent 做语义判断：搜索、筛选、摘要、编辑口吻、链接核验。

@@ -71,6 +71,8 @@ DISPATCH_MODE=ci 或 local
    - `AGENT_RUNNER_CMD` 是“GitHub 到点后调用哪个 agent 来写 Markdown 的命令”；项目不能替用户猜测具体 agent。
    - 在询问 API Key 前，必须给用户两个真实选项：A）复用当前桌面 agent 的原生自动化，不需要显式 API，但依赖本机与应用；B）GitHub 云端定时，需要非交互 runner 和 provider 凭据，电脑关机后仍可运行。
    - 用户选择 A 时，检查当前 runtime 是否提供原生 automation/schedule 能力。支持时先向用户展示时间、工作区和任务内容，再通过 runtime 的正式自动化接口创建；不支持时明确说明，提供手动运行或路线 B。禁止用伪造的后台脚本冒充 agent 自动化。
+   - 配置 Codex 以外的 agent 应用时，必须读取 `RUNTIME_ADAPTERS.md`，识别产品和版本，并查询该产品的官方文档或官方仓库；核实定时接口、登录继承、后台条件、联网/文件权限、日志位置和费用后再操作。事实、推断和未知项要分开汇报。
+   - 不得把某个产品的 CLI 参数、订阅权益或 API Key 要求类推到另一个产品。官方资料仍无法确认时，保持自动化关闭并给出手动路径。
    - 桌面自动化的任务内容应要求：从项目根目录读取 `AGENTS.md/config.md`，运行当天真实速递，严格验证、TTS、邮件，失败时保留日志；不要修改 GitHub 配置或提交生成物。
    - 选择桌面自动化时保持 GitHub `DISPATCH_ENABLED=false`，避免两套定时重复发送。
 8. 优先尝试自动化 GitHub 配置诊断：
@@ -116,6 +118,8 @@ DISPATCH_MODE=ci 或 local
 1. `config.md`：内容配置、领域、来源、时效、路径。
 2. `AGENTS.md`：本执行契约。
 3. 前一天 `data/{YYYY-MM-DD}_学术速递.md`（如果存在）：提取标题作为去重黑名单。
+
+`RUNTIME_ADAPTERS.md` 只在首次配置、迁移调度器或用户询问其他 agent 应用时读取；每日内容生成无需重复读取。
 
 ### Step 2：采集内容
 
