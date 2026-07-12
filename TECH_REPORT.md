@@ -22,6 +22,8 @@ run_daily.py --skip-email
 GitHub Actions artifacts / 本地 data/
 ```
 
+调度适配分为两类：GitHub Actions 在云端调用非交互 provider，需要独立凭据；Codex 等桌面 runtime 若提供原生 automation，可复用用户已有登录在本机定时启动 agent。二者共享 `AGENTS.md/config.md` 和确定性后处理，但运行可用性与凭据边界不同，默认禁止同时启用以避免重复邮件。
+
 核心原则：
 
 - Agent 做语义判断：搜索、筛选、摘要、编辑口吻、链接核验。
