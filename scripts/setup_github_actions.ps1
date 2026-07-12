@@ -130,16 +130,44 @@ function Find-GitHubCli {
 function Invoke-Gh {
     param(
         [string]$GhPath,
-        [string[]]$Arguments,
-        [switch]$PipeInput,
-        [string]$InputText
+        [string[]]$Arguments
     )
-    if ($PipeInput) {
-        $InputText | & $GhPath @Arguments
-    } else {
-        & $GhPath @Arguments
-    }
+    & $GhPath @Arguments
     return $LASTEXITCODE
+}
+
+function Set-GhSecret {
+    param(
+        [string]$GhPath,
+        [string]$Name,
+        [string]$Repo,
+        [string]$Value
+    )
+    if ($Name -notmatch "^[A-Z0-9_]+$") { throw "无效的 secret 名称: $Name" }
+    if ($Repo -notmatch "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") { throw "无效的 GitHub repo: $Repo" }
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $GhPath
+    $startInfo.Arguments = "secret set `"$Name`" --repo `"$Repo`""
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $process.StandardInput.BaseStream.Flush()
+    $process.StandardInput.Close()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+    if ($stdout.Trim()) { Write-Host $stdout.Trim() }
+    if ($stderr.Trim()) { Write-Host $stderr.Trim() -ForegroundColor Red }
+    return $process.ExitCode
 }
 
 function Test-GitHubDns {
@@ -393,8 +421,8 @@ if ($NonInteractive) {
 }
 
 foreach ($name in $requiredSecrets) {
-    Invoke-Gh -GhPath $ghPath -Arguments @("secret", "set", $name, "--repo", $Repo) -PipeInput -InputText $dotEnv[$name]
-    if ($LASTEXITCODE -ne 0) { throw "写入 secret 失败: $name" }
+    $secretExitCode = Set-GhSecret -GhPath $ghPath -Name $name -Repo $Repo -Value $dotEnv[$name]
+    if ($secretExitCode -ne 0) { throw "写入 secret 失败: $name" }
     Write-Status "OK" "secret: $name"
 }
 
