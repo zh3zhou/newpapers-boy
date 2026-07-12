@@ -41,6 +41,18 @@ class ProjectDoctorTests(unittest.TestCase):
         state["variables"] = {"DISPATCH_ENABLED": "true", "AGENT_RUNNER_CMD": "agent run"}
         self.assertEqual(evaluate_target("github-scheduled", BASE_CHECKS, state, True)[0], "ready")
 
+    def test_openai_runner_requires_its_provider_secret(self):
+        state = {"secret_names": set(SMTP_NAMES), "variables": {}}
+        state["variables"] = {
+            "DISPATCH_ENABLED": "true",
+            "AGENT_RUNNER_CMD": "python scripts/openai_dispatch_agent.py",
+        }
+        readiness, reasons = evaluate_target("github-scheduled", BASE_CHECKS, state, True)
+        self.assertEqual(readiness, "blocked")
+        self.assertIn("OPENAI_API_KEY", reasons[0])
+        state["secret_names"].add("OPENAI_API_KEY")
+        self.assertEqual(evaluate_target("github-scheduled", BASE_CHECKS, state, True)[0], "ready")
+
         state["variables"] = {"DISPATCH_ENABLED": "true"}
         state["secret_names"].add("AGENT_RUNNER_CMD")
         self.assertEqual(evaluate_target("github-scheduled", BASE_CHECKS, state, True)[0], "ready")

@@ -78,6 +78,13 @@ DISPATCH_MODE=ci 或 local
    - 如果用户确认要配置且诊断允许，引导运行 `.\scripts\setup_github_actions.ps1`。该脚本会把 `.env` 中的 `SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_TO` 写入 GitHub Secrets，把 `TTS_VOICE/TTS_RATE/AGENT_RUNNER_CMD` 写入 Variables，并可触发一次 mock workflow。
    - 如果 `AGENT_RUNNER_CMD` 还没有确定，允许只配置邮件和 TTS，先跑 mock；真实定时运行会等用户选定 agent 命令后再启用。
    - 没有真实 runner 时设置 `DISPATCH_ENABLED=false`。只有 runner 和凭据验证通过后，才允许改为 `true`。
+   - 用户要配置真实定时时，优先提供内置 OpenAI 路径，并明确说明 ChatGPT/Codex 登录不等于 API Key、API 单独计费。先运行：
+     ```powershell
+     .\.venv\Scripts\python.exe scripts\configure_real_schedule.py --check-only
+     .\.venv\Scripts\python.exe scripts\configure_real_schedule.py
+     ```
+   - API Key 必须由用户在终端的隐藏输入中填写，不要求用户发到对话里，不写入 `.env`。向导会先真实试跑且不发邮件，成功后才询问开启定时。
+   - 用户选择其他 provider 时，不猜命令：确认其非交互 CLI/API、凭据名称和联网能力，先保持 `DISPATCH_ENABLED=false` 做手动真实试跑，通过后再启用。
    - 如果用户选择暂不配置 GitHub 自动运行，进入「不配置也能用」说明，不要卡住流程。
 9. 检查环境：如 `.venv` 不存在，提示运行 `.\setup.ps1`；确保 `data/` 和 `archive/` 存在。
 10. 说明手动运行方式：
@@ -298,6 +305,9 @@ A：写你实际使用的 agent CLI 或脚本命令。它只需要读 `AGENTS.md
 
 **Q：没有 API Key 能不能用？**
 A：交互式 agent 可以直接按本文件手动运行；GitHub 无人值守真生成必须有 runner 和对应凭据。没有 runner 时保持 `DISPATCH_ENABLED=false`，仍可手动 mock。
+
+**Q：ChatGPT Plus/Pro 或 Codex 登录能直接给 GitHub Actions 用吗？**
+A：不能。GitHub 云端不继承本机登录。内置 OpenAI runner 需要单独的 OpenAI API Key 和 API 计费；Key 只通过配置向导的隐藏终端输入上传为 GitHub Secret。
 
 **Q：邮件失败是否会让 CI 失败？**
 A：定时任务使用 `--strict-email`，邮件失败会失败；手动 mock 可选择不发送邮件。

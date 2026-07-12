@@ -82,6 +82,7 @@ agent 命令必须：
 - `TTS_VOICE`、`TTS_RATE`
 - `AGENT_ENV_ALLOWLIST`
 - agent provider API keys，如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GOOGLE_API_KEY`、`HF_TOKEN`
+- 内置 OpenAI runner 可配置 `OPENAI_MODEL`，默认 `gpt-5.4-mini`
 
 ### 3.1 GitHub 配置向导
 
@@ -100,6 +101,12 @@ agent 命令必须：
 - 非交互写入必须同时使用 `-NonInteractive -ConfirmWrite`，可用 `-SendEmailMock` 测试邮件。
 
 该脚本不会提交代码、不会 push、不会替用户创建真实 agent 命令。workflow 必须先提交并 push 到 GitHub，Actions 页面才会出现；如果用户暂不配置 GitHub，仍可按 `AGENTS.md` 让 agent 手动执行，或对已有 Markdown 运行 `run_daily.py`。
+
+### 3.2 真实定时配置向导
+
+`scripts/configure_real_schedule.py` 提供首个可直接工作的 provider adapter。它通过隐藏输入接收 OpenAI API Key，上传为 GitHub Secret，设置 `AGENT_RUNNER_CMD=python scripts/openai_dispatch_agent.py` 和 `OPENAI_MODEL`。启用采用两阶段提交：先在 `DISPATCH_ENABLED=false` 下触发 `mock=false, send_email=false` 的真实试跑；只有 workflow 成功且用户再次确认才打开 schedule。失败不会留下半启用状态。
+
+`scripts/openai_dispatch_agent.py` 使用 Responses API Web Search，读取仓库中的 `AGENTS.md/config.md` 并只写 `DISPATCH_OUTPUT`。其输出仍必须经过同一严格 validator，因此 provider adapter 不是可信边界。
 
 ## 4. 配置体系
 

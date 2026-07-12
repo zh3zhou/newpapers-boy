@@ -262,6 +262,11 @@ def evaluate_target(target: str, checks: list[dict], github_state: dict, require
     )
     if not runner_configured:
         return "blocked", ["GitHub 尚未配置 AGENT_RUNNER_CMD。"]
+    runner_command = str(variables.get("AGENT_RUNNER_CMD", "")).strip()
+    if "openai_dispatch_agent.py" in runner_command and "OPENAI_API_KEY" not in set(
+        github_state.get("secret_names", set())
+    ):
+        return "blocked", ["内置 OpenAI runner 已配置，但 GitHub 缺少 OPENAI_API_KEY Secret。"]
     return "ready", []
 
 

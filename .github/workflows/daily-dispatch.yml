@@ -103,6 +103,7 @@ jobs:
           AGENT_ENV_ALLOWLIST: ${{ vars.AGENT_ENV_ALLOWLIST }}
           AGENT_PROVIDER_TOKEN: ${{ secrets.AGENT_PROVIDER_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.4-mini' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

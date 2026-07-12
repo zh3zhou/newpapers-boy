@@ -64,6 +64,32 @@ Gmail 使用应用专用密码，QQ 邮箱使用 SMTP 授权码。只生成 Mark
 
 GitHub 云端机器不能继承你在本机 Codex 或其他桌面 agent 中的登录。没有真实 runner 时，项目会保持 `DISPATCH_ENABLED=false`，定时事件安全跳过；手动 mock 不受影响。
 
+### 配置真实定时（推荐路径）
+
+项目内置 `scripts/openai_dispatch_agent.py`，使用 OpenAI Responses API 的 Web Search 生成真实简报。它需要 [OpenAI API Key](https://platform.openai.com/api-keys) 和 [API 余额/账单设置](https://platform.openai.com/settings/organization/billing/overview)；ChatGPT Plus/Pro 或 Codex 桌面端登录不能替代 API Key，API 使用单独计费。默认使用支持 Web Search、成本相对较低的 [`gpt-5.4-mini`](https://developers.openai.com/api/docs/models/gpt-5.4-mini)。
+
+先只读检查：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\configure_real_schedule.py --check-only
+```
+
+确认 GitHub、邮箱 mock 都已就绪后运行交互向导：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\configure_real_schedule.py
+```
+
+向导会在终端中隐藏 API Key 输入，不写入 `.env` 或命令历史。它依次执行：
+
+1. 上传 `OPENAI_API_KEY` 到 GitHub Secrets。
+2. 配置内置 runner 和默认模型 `gpt-5.4-mini`。
+3. 保持 `DISPATCH_ENABLED=false`，先触发一次真实生成且不发邮件。
+4. 等待生成、严格验证和 TTS 全部成功。
+5. 再询问是否开启每天北京时间 07:00；只有用户确认才写入 `DISPATCH_ENABLED=true`。
+
+试跑失败时定时保持关闭。把 Actions 运行链接交给 agent，说“请检查这次真实试跑为什么失败”即可继续排查。其他模型可用 `--model 模型名`；其他 provider 仍可按下文的 `AGENT_RUNNER_CMD` 契约接入。
+
 ### Agent 命令契约
 
 任何命令只要读取 `AGENTS.md`、`config.md`，并把 UTF-8 Markdown 写到 `DISPATCH_OUTPUT`，都可以成为 `AGENT_RUNNER_CMD`。
@@ -152,6 +178,7 @@ workflow 必须先提交并 push 到默认分支。随后运行：
 | `AGENT_ENV_ALLOWLIST` | Variable | 额外允许传给 agent 的 provider 环境变量名 |
 | `DISPATCH_ENABLED` | Variable | `true` 才允许 schedule 真跑 |
 | provider key | Secret | 例如 `OPENAI_API_KEY` 或 `AGENT_PROVIDER_TOKEN` |
+| `OPENAI_MODEL` | Variable | 内置 OpenAI runner 使用的模型，默认 `gpt-5.4-mini` |
 
 手动 smoke：在 Actions 页面运行 `Daily Academic Dispatch`，选择 `mock=true`；`send_email=true` 会同时验证 TTS 和邮件。
 
