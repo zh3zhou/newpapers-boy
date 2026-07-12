@@ -146,28 +146,16 @@ function Set-GhSecret {
     if ($Name -notmatch "^[A-Z0-9_]+$") { throw "无效的 secret 名称: $Name" }
     if ($Repo -notmatch "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") { throw "无效的 GitHub repo: $Repo" }
 
-    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = $GhPath
-    $startInfo.Arguments = "secret set `"$Name`" --repo `"$Repo`""
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardInput = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $startInfo
-    [void]$process.Start()
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
-    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-    $process.StandardInput.BaseStream.Flush()
-    $process.StandardInput.Close()
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-    if ($stdout.Trim()) { Write-Host $stdout.Trim() }
-    if ($stderr.Trim()) { Write-Host $stderr.Trim() -ForegroundColor Red }
-    return $process.ExitCode
+    $tempPath = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllText($tempPath, $Value, [System.Text.UTF8Encoding]::new($false))
+        $process = Start-Process -FilePath $GhPath `
+            -ArgumentList @("secret", "set", $Name, "--repo", $Repo) `
+            -RedirectStandardInput $tempPath -NoNewWindow -Wait -PassThru
+        return $process.ExitCode
+    } finally {
+        Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Test-GitHubDns {
