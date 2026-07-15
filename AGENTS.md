@@ -57,7 +57,7 @@ DISPATCH_MODE=ci 或 local
    ```powershell
    .\.venv\Scripts\python.exe scripts\project_doctor.py --target manual --json
    ```
-   如果 `.venv` 不存在，先运行 `.\setup.ps1`。介绍项目：每天搜集学术论文，穿插艺术和轻松内容，生成 Markdown 与 TTS 音频并通过邮件推送。
+   如果 `.venv` 不存在，Windows 运行 `.\setup.ps1`，Linux/macOS 运行 `sh setup.sh`。介绍项目：每天搜集学术论文，穿插艺术和轻松内容，生成 Markdown 与 TTS 音频并通过邮件推送。
 2. 读取 `config.md` 第一节表格，询问是否调整学术领域、关键词和每日条数；需要时直接编辑该表格。
 3. 询问艺术方向偏好，更新 `config.md` 第三节「艺术方向偏好」。
 4. 询问每日运行时间。默认北京时间 07:00。
@@ -92,12 +92,13 @@ DISPATCH_MODE=ci 或 local
    - API Key 必须由用户在终端的隐藏输入中填写，不要求用户发到对话里，不写入 `.env`。向导会先真实试跑且不发邮件，成功后才询问开启定时。
    - 用户选择其他 provider 时，不猜命令：确认其非交互 CLI/API、凭据名称和联网能力，先保持 `DISPATCH_ENABLED=false` 做手动真实试跑，通过后再启用。
    - 如果用户选择暂不配置 GitHub 自动运行，进入「不配置也能用」说明，不要卡住流程。
-9. 检查环境：如 `.venv` 不存在，提示运行 `.\setup.ps1`；确保 `data/` 和 `archive/` 存在。
+9. 检查环境：如 `.venv` 不存在，Windows 提示运行 `.\setup.ps1`，Linux/macOS 提示运行 `sh setup.sh`；确保 `data/` 和 `archive/` 存在。
 10. 说明手动运行方式：
    ```powershell
    .\scripts\postprocess.ps1 2026-07-04
    .\.venv\Scripts\python.exe run_daily.py 2026-07-04
    ```
+   Linux/macOS 使用 `.venv/bin/python run_daily.py 2026-07-04`。
 11. 创建 `.first_run_done` 空文件，询问是否立即运行一次。
 
 不要在 CI 模式中创建 `.first_run_done` 或写 `.env`。
@@ -185,6 +186,8 @@ DISPATCH_MODE=ci 或 local
 .\.venv\Scripts\python.exe scripts\validate_dispatch.py YYYY-MM-DD --strict --check-links
 .\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD
 ```
+
+Linux/macOS 将解释器路径替换为 `.venv/bin/python`；各 Python CLI 也支持 `--root` 从任意工作目录指定项目。
 
 CI 模式由 GitHub Actions 自动运行：
 
@@ -324,4 +327,4 @@ A：如果当前 Codex/agent 应用支持原生自动化，可以复用该应用
 A：定时任务使用 `--strict-email`，邮件失败会失败；手动 mock 可选择不发送邮件。
 
 **Q：本地 `.venv` 坏了怎么办？**
-A：重新安装 Python 后运行 `.\setup.ps1`。CI 使用 `actions/setup-python`，不依赖本地 `.venv`。
+A：重新安装 Python 后，Windows 运行 `.\setup.ps1`，Linux/macOS 运行 `sh setup.sh`。CI 使用 `actions/setup-python`，不依赖本地 `.venv`。

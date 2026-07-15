@@ -19,10 +19,10 @@ cd <repo-dir>
 Linux/macOS：
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python scripts/project_doctor.py --target manual
+sh setup.sh
 ```
+
+也可以继续手动创建 `.venv`；`setup.sh` 只是把创建环境、安装依赖、准备 `.env` 和本地体检合并为一个可重复入口。
 
 然后在项目目录对任意有文件、终端和联网能力的 agent 说：
 
@@ -31,6 +31,19 @@ python3 -m venv .venv
 ```
 
 交互式 agent 会直接完成研究和 Markdown 生成，不需要再填写 `AGENT_RUNNER_CMD` 或单独的 API Key。是否能联网、写文件和运行命令，仍取决于该 agent 当前会话的能力与权限。
+
+### 可移植命令入口
+
+所有确定性 Python CLI 都可以通过脚本路径从任意工作目录调用，并用 `--root` 明确目标项目。相对的 Markdown、MP3、报告和配置路径都基于该根目录解析；省略参数时保持原有行为。在项目根目录内还可以使用 `python -m scripts.<module>` 的模块方式。
+
+```bash
+python /path/to/academic-dispatch/run_daily.py 2026-07-15 --root /path/to/academic-dispatch --skip-email
+cd /path/to/academic-dispatch
+python -m scripts.validate_dispatch 2026-07-15 --root /path/to/academic-dispatch --strict
+python -m scripts.tts_generate 2026-07-15 --root /path/to/academic-dispatch
+```
+
+这使同一套后处理可以被桌面自动化、CI、容器或另一个 Python 调度器复用，不要求调用方切换到固定工作目录。旧的 `python scripts/<name>.py ...` 入口仍然兼容。
 
 ## 邮件和语音
 
@@ -257,9 +270,13 @@ academic-dispatch/
 ├── RUNTIME_ADAPTERS.md             # 运行时调查与适配协议
 ├── CHANGELOG.md                    # 重要版本和验证记录
 ├── config.md                       # 人类内容偏好
+├── setup.ps1 / setup.sh            # Windows 与 Linux/macOS 初始化
 ├── .github/workflows/
 │   └── daily-dispatch.yml          # 隔离的生成/交付流程
 ├── scripts/
+│   ├── dispatch_config.py          # 配置表纯解析
+│   ├── dispatch_markdown.py        # Markdown 内容模型纯解析
+│   ├── dispatch_paths.py           # 项目布局、日期和工件命名
 │   ├── project_doctor.py           # 三种目标的脱敏体检
 │   ├── run_agent_command.py        # 通用 agent 命令适配
 │   ├── validate_dispatch.py        # 结构、链接和 JSON 报告
@@ -283,6 +300,8 @@ academic-dispatch/
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe scripts\validate_dispatch.py 2026-07-04 --strict --check-links
 ```
+
+Linux/macOS 对应使用 `.venv/bin/python`。命令也支持模块方式，例如 `python -m scripts.validate_dispatch --help`。
 
 ## License
 

@@ -12,51 +12,20 @@ import re
 import socket
 import ssl
 import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
-from tts_generate import parse_markdown
+try:
+    from .dispatch_config import FieldSpec, parse_config_fields, parse_count_spec
+    from .dispatch_markdown import parse_markdown
+    from .dispatch_paths import ProjectPaths, resolve_from_root
+except ImportError:  # Direct script execution: python scripts/validate_dispatch.py
+    from dispatch_config import FieldSpec, parse_config_fields, parse_count_spec
+    from dispatch_markdown import parse_markdown
+    from dispatch_paths import ProjectPaths, resolve_from_root
 
 WORK_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = WORK_DIR / "data"
-
-
-@dataclass
-class FieldSpec:
-    name: str
-    count_spec: str
-    min_items: int | None = None
-    max_items: int | None = None
-
-
-def parse_count_spec(value: str) -> tuple[int | None, int | None]:
-    m = re.search(r"(\d+)\s*-\s*(\d+)", value)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    m = re.search(r"(\d+)", value)
-    if m:
-        num = int(m.group(1))
-        return num, num
-    return None, None
-
-
-def parse_config_fields(config_path: Path) -> list[FieldSpec]:
-    if not config_path.exists():
-        return []
-
-    fields: list[FieldSpec] = []
-    for line in config_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|") or "---" in stripped:
-            continue
-        parts = [part.strip() for part in stripped.strip("|").split("|")]
-        if len(parts) < 4 or not parts[0].isdigit():
-            continue
-        min_items, max_items = parse_count_spec(parts[3])
-        fields.append(FieldSpec(parts[1], parts[3], min_items, max_items))
-    return fields
 
 
 def normalize_heading(title: str) -> str:
@@ -440,20 +409,25 @@ def validate_dispatch(
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="验证每日学术速递 Markdown 契约。")
     parser.add_argument("date", help="日期，格式 YYYY-MM-DD。")
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
     parser.add_argument("--strict", action="store_true", help="启用 CI 严格检查。")
     parser.add_argument("--check-links", action="store_true", help="检查 URL 可达性并写入验证报告。")
     parser.add_argument("--link-timeout", type=float, default=8.0, help="每个 URL 的超时秒数。")
-    parser.add_argument("--markdown", type=Path, help="Markdown 文件路径。")
-    parser.add_argument("--config", type=Path, default=WORK_DIR / "config.md", help="配置文件路径。")
-    parser.add_argument("--report", type=Path, help="JSON 报告输出路径。")
+    parser.add_argument("--markdown", type=Path, help="Markdown 文件；相对路径基于项目根目录。")
+    parser.add_argument("--config", type=Path, help="配置文件；相对路径基于项目根目录。")
+    parser.add_argument("--report", type=Path, help="JSON 报告；相对路径基于项目根目录。")
     args = parser.parse_args(argv)
 
-    md_path = args.markdown or DATA_DIR / f"{args.date}_学术速递.md"
-    report_path = args.report or DATA_DIR / f"{args.date}_validation.json"
+    project = ProjectPaths.from_root(args.root)
+    default_markdown = project.data / f"{args.date}_学术速递.md"
+    default_report = project.data / f"{args.date}_validation.json"
+    md_path = resolve_from_root(args.markdown, project.root, default_markdown)
+    config_path = resolve_from_root(args.config, project.root, project.config)
+    report_path = resolve_from_root(args.report, project.root, default_report)
     report = validate_dispatch(
         args.date,
         md_path,
-        args.config,
+        config_path,
         args.strict,
         check_links=args.check_links,
         link_timeout=args.link_timeout,

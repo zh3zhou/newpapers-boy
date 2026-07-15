@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-15
+
+- 将配置表、Markdown 内容模型、日期与工件路径抽成无副作用核心模块，解除 runner/doctor/validator 对 TTS 模块的隐式依赖。
+- 为 runner、validator、TTS、邮件和后处理入口增加显式项目根目录及可选工件路径，同时保留全部旧 CLI。
+- `run_daily.py` 现在同时识别 Windows 与 Linux/macOS 虚拟环境；新增 `setup.sh` 和模块方式运行支持。
+- 新增可移植性回归测试，覆盖任意根目录、配置表隔离、英文标题、日期、模块导入和 Unix venv。
+
 ## 2026-07-13
 
 - 将每日速递从 TRAE 专用工作流改造成平台中立的 agent 契约与确定性后处理架构。

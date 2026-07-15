@@ -13,8 +13,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from env_utils import parse_env_file
-from validate_dispatch import parse_config_fields
+try:
+    from .dispatch_config import parse_config_fields
+    from .env_utils import parse_env_file
+except ImportError:  # Direct script execution: python scripts/project_doctor.py
+    from dispatch_config import parse_config_fields
+    from env_utils import parse_env_file
 
 WORK_DIR = Path(__file__).resolve().parent.parent
 TARGETS = ("manual", "github-mock", "github-scheduled")
@@ -343,7 +347,7 @@ def main(argv=None) -> int:
     parser.add_argument("--target", choices=TARGETS, default="manual")
     parser.add_argument("--json", action="store_true", help="输出不含秘密值的 JSON。")
     parser.add_argument("--require-email", action="store_true", help="把邮件配置作为就绪条件。")
-    parser.add_argument("--root", type=Path, default=WORK_DIR, help=argparse.SUPPRESS)
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
     args = parser.parse_args(argv)
 
     report = build_report(args.root.resolve(), args.target, args.require_email)

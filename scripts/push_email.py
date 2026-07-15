@@ -23,21 +23,20 @@ import html
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import urllib.request
 import urllib.error
 
-from env_utils import load_env
+try:
+    from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from .env_utils import load_env
+except ImportError:  # Direct script execution: python scripts/push_email.py
+    from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from env_utils import load_env
 
 WORK_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = WORK_DIR / "data"
-
-
-def ensure_data_dir():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============ Markdown → HTML 轻量转换 ============
@@ -280,17 +279,24 @@ def build_summary(md_path: Path) -> tuple:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="发送学术速递邮件。")
     parser.add_argument("date", nargs="?", help="日期，格式 YYYY-MM-DD。")
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
+    parser.add_argument("--markdown", type=Path, help="输入 Markdown；相对路径基于项目根目录。")
+    parser.add_argument("--mp3", type=Path, help="MP3 附件；相对路径基于项目根目录。")
     parser.add_argument("--strict", action="store_true", help="失败时返回非零退出码，供 CI 使用。")
     args = parser.parse_args(argv)
 
-    ensure_data_dir()
-    env = load_env(WORK_DIR)
+    project = ProjectPaths.from_root(args.root)
+    project.data.mkdir(parents=True, exist_ok=True)
+    env = load_env(project.root)
     strict = args.strict or env.get("DISPATCH_MODE") == "ci"
 
-    date_str = args.date or datetime.now().strftime("%Y-%m-%d")
-
-    md_path = DATA_DIR / f"{date_str}_学术速递.md"
-    mp3_path = DATA_DIR / f"{date_str}_学术播报.mp3"
+    try:
+        date_str = resolve_dispatch_date(args.date)
+    except ValueError as exc:
+        parser.error(str(exc))
+    artifacts = project.artifacts(date_str)
+    md_path = resolve_from_root(args.markdown, project.root, artifacts.markdown)
+    mp3_path = resolve_from_root(args.mp3, project.root, artifacts.audio)
 
     title, summary = build_summary(md_path)
     push_title = f"📰 {title}"
@@ -322,7 +328,7 @@ def main(argv=None):
             return 1
         print("[INFO] 邮件推送未配置或失败。")
         print("[INFO] 如需邮件推送，请在 .env 文件或 CI secrets 中填写 SMTP_HOST / SMTP_USER / SMTP_PASS / MAIL_TO。")
-        print(f"[INFO] 本地配置文件位置：{WORK_DIR / '.env'}")
+        print(f"[INFO] 本地配置文件位置：{project.env_file}")
         return 0
 
     print()

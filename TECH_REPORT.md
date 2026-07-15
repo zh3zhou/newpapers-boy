@@ -11,6 +11,8 @@ config.md + AGENTS.md
         ↓
 data/YYYY-MM-DD_学术速递.md
         ↓
+dispatch_config + dispatch_markdown + dispatch_paths
+        ↓
 scripts/validate_dispatch.py
         ↓
 GitHub generate artifact / 本地 data/
@@ -31,6 +33,7 @@ GitHub Actions artifacts / 本地 data/
 - Agent 做语义判断：搜索、筛选、摘要、编辑口吻、链接核验。
 - 脚本做确定性工作：环境读取、结构验证、TTS、邮件、退出码。
 - 调度器只做编排：GitHub Actions、本机计划任务或其他 agent 平台都可以。
+- 核心模型无网络和外部副作用：配置、Markdown、日期与工件路径可以被 CLI、测试或第三方调度器直接导入。
 
 ## 2. Agent 运行器契约
 
@@ -124,6 +127,8 @@ agent 命令必须：
 
 `scripts/env_utils.py` 会先读 `.env`，再用进程环境覆盖。这保证本地文件方便调试，CI secrets 拥有更高优先级。
 
+`scripts/dispatch_config.py` 只解析带有「领域 / 每日条数」表头的学术表格，避免把自定义配置中的其他编号表误识别为领域。它同时保留关键词和条数上下限，供 runner、validator 与 doctor 共用。
+
 `scripts/project_doctor.py` 提供三种脱敏 readiness：
 
 - `manual`：Python 3.9+ 真探针、依赖、配置和本地目录；可选要求邮箱。
@@ -167,6 +172,8 @@ agent 命令必须：
 - 打岔板块标题必须包含「打岔」。
 - 艺术和幽默分别用三级标题。
 
+`scripts/dispatch_markdown.py` 是上述结构的无副作用内容模型。Validator 与 TTS 都依赖它，而不是互相导入；英文 `art/humor/diversion` 标题按大小写无关方式识别。`scripts/dispatch_paths.py` 集中维护日期校验和五类每日工件名称，避免各入口产生路径漂移。
+
 ## 6. Validator
 
 `scripts/validate_dispatch.py` 做确定性契约验证：
@@ -188,7 +195,7 @@ agent 命令必须：
 
 `scripts/tts_generate.py`：
 
-- 从 Markdown 二级标题动态解析学术领域，不硬编码字段名。
+- 通过共享 Markdown 内容模型动态解析学术领域，不硬编码字段名。
 - 用状态机识别打岔、艺术、幽默。
 - `edge_tts` 懒加载，便于测试 parser 时不安装 TTS 依赖。
 - 输出：
@@ -222,8 +229,9 @@ agent 命令必须：
 - 支持：
   - `--skip-email`
   - `--strict-email`
+  - `--root`，从任意工作目录指定目标项目
 
-它会优先使用可用的 `.venv\Scripts\python.exe`。如果本地虚拟环境已损坏，会回退到当前 Python 并打印 warning。GitHub Actions 不依赖本地 `.venv`。
+它会按平台优先使用 `.venv\Scripts\python.exe` 或 `.venv/bin/python`。如果本地虚拟环境已损坏，会回退到当前 Python 并打印 warning。TTS、邮件、validator 和 runner 同样支持 `--root`；TTS 与邮件还支持显式 Markdown/MP3/朗读稿路径。GitHub Actions 的旧命令无需修改。
 
 ## 10. 测试
 
@@ -242,6 +250,7 @@ python -m unittest discover -s tests
 - doctor 三种 target、Secret 脱敏和 manual 不触发 GitHub 探针。
 - fake agent 成功、失败、缺输出、旧输出、空文件、非 UTF-8、日志脱敏和 SMTP 环境隔离。
 - 链接永久失败、限流/临时失败和私网地址分类。
+- 任意项目根目录、集中工件命名、有效日期、Unix venv、模块入口和大小写无关英文板块。
 
 手动验证：
 
