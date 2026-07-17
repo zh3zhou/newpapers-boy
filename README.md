@@ -1,10 +1,30 @@
 # 会打岔的学术速递
 
+[中文（默认）](README.md) · [English](README.en.md)
+
 每天搜集学术内容，穿插艺术和轻松内容，生成 Markdown、中文语音和邮件。Agent 负责研究与编辑，脚本负责结构验证、链接检查、TTS、邮件和运行证据。
 
 项目不绑定某个 IDE 或 agent 平台：人类偏好在 `config.md`，agent 契约在 `AGENTS.md`，可重复步骤在 `scripts/`，运行结果在本地 `data/` 或 GitHub Actions artifacts。
 
-## 快速开始
+## 推荐方式：让 Agent 帮你部署
+
+对大多数用户，安装、检查环境、配置本地运行或定时推送的最好方法，是把仓库交给一个能读取文件和运行终端命令的 agent，并直接说：
+
+```text
+请读取 AGENTS.md、README.md 和 config.md，帮我部署这个项目。默认用中文交流；检查当前环境后，先说明本地运行和定时推送两种方案，再执行适合当前环境的配置。不要让我在对话中发送密码或 API Key，也不要在未经确认时开启云端定时或修改 GitHub 配置。
+```
+
+agent 会按项目契约检查 Python、虚拟环境、邮件/TTS 配置、GitHub 状态和可用的自动化能力，并在需要你选择或输入秘密时停下来说明。你也可以明确说“Please continue in English”，之后让 agent 用英文引导；项目生成内容仍以 `config.md` 的语言设置为准。
+
+如果你只想马上生成一次速递，可以说：
+
+```text
+请读取 AGENTS.md 和 config.md，运行今天的学术速递。
+```
+
+## 手动安装（可选）
+
+如果你更喜欢自己操作终端，再使用下面的命令。
 
 Windows PowerShell：
 
@@ -24,7 +44,7 @@ sh setup.sh
 
 也可以继续手动创建 `.venv`；`setup.sh` 只是把创建环境、安装依赖、准备 `.env` 和本地体检合并为一个可重复入口。
 
-然后在项目目录对任意有文件、终端和联网能力的 agent 说：
+安装完成后，在项目目录对任意有文件、终端和联网能力的 agent 说：
 
 ```text
 请读取 AGENTS.md 和 config.md，运行今天的学术速递。
@@ -267,6 +287,7 @@ workflow 必须先提交并 push 到默认分支。随后运行：
 ```text
 academic-dispatch/
 ├── AGENTS.md                       # 平台无关 agent 契约
+├── README.md / README.en.md        # 默认中文说明与可选英文入口
 ├── RUNTIME_ADAPTERS.md             # 运行时调查与适配协议
 ├── CHANGELOG.md                    # 重要版本和验证记录
 ├── config.md                       # 人类内容偏好
