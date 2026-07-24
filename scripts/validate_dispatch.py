@@ -373,14 +373,32 @@ def validate_dispatch(
 
         if strict:
             art_section = subsection_text(diversion, r"艺术|摄影|art")
-            for idx, block in enumerate(item_blocks(art_section), 1):
+            art_blocks = item_blocks(art_section)
+            art_sources = []
+            art_hosts = []
+            for idx, block in enumerate(art_blocks, 1):
                 first_line = block.splitlines()[0] if block.splitlines() else ""
-                if not re.search(r"^\s*[-*]\s+\*\*.+?\*\*\s+[—-]\s+\S+", first_line):
+                source_match = re.search(r"^\s*[-*]\s+\*\*.+?\*\*\s+[—-]\s+(.+?)\s*$", first_line)
+                if not source_match:
                     report["errors"].append(f"art item {idx} is missing a source")
+                else:
+                    art_sources.append(source_match.group(1).strip().casefold())
                 if "简介" not in block:
                     report["errors"].append(f"art item {idx} is missing 简介")
-                if not extract_urls(block):
+                block_urls = extract_urls(block)
+                if not block_urls:
                     report["errors"].append(f"art item {idx} is missing a URL")
+                else:
+                    host = (urlsplit(block_urls[0]).hostname or "").lower()
+                    art_hosts.append(host.removeprefix("www."))
+            if (
+                len(art_blocks) >= 2
+                and (len(set(art_sources)) < 2 or len(set(art_hosts)) < 2)
+            ):
+                report["errors"].append(
+                    "art section must use at least 2 distinct sources and domains "
+                    "when it contains 2 or more items"
+                )
 
     report["arts"] = len(parsed.get("arts", []))
     report["humors"] = len(parsed.get("humors", []))

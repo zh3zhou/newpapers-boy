@@ -2,10 +2,22 @@
 
 import unittest
 
-from scripts.openai_dispatch_agent import add_citation_links, extract_output_text, strip_markdown_fence
+from scripts.openai_dispatch_agent import (
+    add_citation_links,
+    build_prompt,
+    extract_output_text,
+    strip_markdown_fence,
+)
 
 
 class OpenAIDispatchAgentTests(unittest.TestCase):
+    def test_prompt_requires_diverse_art_web_search_sources(self):
+        prompt = build_prompt("2026-07-24", "agent contract", "content config")
+
+        self.assertIn("广域 web search", prompt)
+        self.assertIn("不得从固定站点抓取或默认只查 MoMA", prompt)
+        self.assertIn("至少覆盖 2 个相互独立的来源/机构", prompt)
+
     def test_extracts_only_message_output_text(self):
         payload = {
             "output": [

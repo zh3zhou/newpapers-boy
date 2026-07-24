@@ -70,7 +70,7 @@ agent 命令必须：
 
 `.github/workflows/daily-dispatch.yml`：
 
-- `schedule`: UTC `0 23 * * *`，对应北京时间 07:00。
+- `schedule`: UTC `30 22 * * *`，对应北京时间 06:30；为生成、验证、TTS 和邮件预留约 30 分钟，目标在北京时间 07:00 左右送达。
 - `workflow_dispatch`: 支持指定日期、mock 模式、是否发送邮件。
 - `DISPATCH_ENABLED=true` 只控制 schedule；手动 workflow 不受影响。
 - `generate` job 解析并验证日期，执行 agent/mock、严格结构与链接检查，上传 source evidence。

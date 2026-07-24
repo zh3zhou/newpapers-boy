@@ -276,6 +276,50 @@ class DispatchContractTests(unittest.TestCase):
         self.assertTrue(any("art item 1 is missing 简介" in error for error in report["errors"]))
         self.assertTrue(any("art item 1 is missing a URL" in error for error in report["errors"]))
 
+    def test_strict_validator_rejects_single_source_art_section(self):
+        repeated_source_md = VALID_MD.replace(
+            "### 会心一笑",
+            """- **Artwork Test Two** — Museum
+  简介：这是同一来源的第二条艺术测试内容。
+  https://example.com/art-two
+
+### 会心一笑""",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.md"
+            md = root / "2026-07-04_学术速递.md"
+            config.write_text(CONFIG, encoding="utf-8")
+            md.write_text(repeated_source_md, encoding="utf-8")
+            report = validate_dispatch("2026-07-04", md, config, strict=True)
+
+        self.assertIn(
+            "art section must use at least 2 distinct sources and domains when it contains 2 or more items",
+            report["errors"],
+        )
+
+    def test_strict_validator_accepts_diverse_art_sources(self):
+        diverse_source_md = VALID_MD.replace(
+            "### 会心一笑",
+            """- **Artwork Test Two** — Art Festival
+  简介：这是不同来源的第二条艺术测试内容。
+  https://festival.example/art-two
+
+### 会心一笑""",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.md"
+            md = root / "2026-07-04_学术速递.md"
+            config.write_text(CONFIG, encoding="utf-8")
+            md.write_text(diverse_source_md, encoding="utf-8")
+            report = validate_dispatch("2026-07-04", md, config, strict=True)
+
+        self.assertNotIn(
+            "art section must use at least 2 distinct sources and domains when it contains 2 or more items",
+            report["errors"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

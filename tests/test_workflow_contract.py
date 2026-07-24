@@ -19,6 +19,10 @@ class WorkflowContractTests(unittest.TestCase):
     def test_schedule_requires_explicit_enable(self):
         self.assertIn("vars.DISPATCH_ENABLED == 'true'", self.generate)
 
+    def test_schedule_leaves_time_for_seven_am_delivery(self):
+        self.assertIn('cron: "30 22 * * *"', self.generate)
+        self.assertIn("finish around 07:00", self.generate)
+
     def test_generate_has_no_smtp_environment(self):
         for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_TO"):
             self.assertNotIn(name, self.generate)

@@ -178,7 +178,7 @@ AGENT_TIMEOUT_SECONDS=1800
 
 ## GitHub Actions
 
-`.github/workflows/daily-dispatch.yml` 每天 UTC `23:00` 触发，对应北京时间 `07:00`。流程分为：
+`.github/workflows/daily-dispatch.yml` 每天 UTC `22:30`（北京时间 `06:30`）触发，为检索、验证、TTS 和邮件预留处理时间，目标在北京时间 `07:00` 左右送达。GitHub Actions 的定时任务可能因平台排队延迟，不能保证精确到分钟。流程分为：
 
 1. `generate`：agent/mock 生成 Markdown，执行严格结构和链接检查，上传 source evidence。
 2. `deliver`：重新下载并验证 Markdown，生成 MP3，可选发送邮件，上传最终 artifacts。

@@ -14,6 +14,23 @@ from pathlib import Path
 ROOT = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parent.parent))
 
 
+def build_prompt(date: str, agents: str, config: str) -> str:
+    return f"""你是无人值守的学术简报编辑 agent。今天是 {date}。
+使用 web search 搜索并核验近期来源，严格执行下面的项目契约和配置。
+只返回最终 Markdown，不要代码围栏、解释或执行日志。标题日期必须是 {date}。
+每个链接必须来自你实际检索到的页面，禁止编造 URL。
+艺术一刻必须主动做广域 web search，不得从固定站点抓取或默认只查 MoMA。
+每日 2-3 条艺术内容至少覆盖 2 个相互独立的来源/机构，同一来源原则上最多 1 条；
+优先轮换可信博物馆、美术馆、艺术节、摄影机构、艺术媒体及艺术家或项目官方页面。
+
+--- AGENTS.md ---
+{agents}
+
+--- config.md ---
+{config}
+"""
+
+
 def add_citation_links(text: str, annotations: list[dict]) -> str:
     edits = []
     for annotation in annotations:
@@ -66,17 +83,7 @@ def main() -> int:
 
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     config = (ROOT / config_name).read_text(encoding="utf-8")
-    prompt = f"""你是无人值守的学术简报编辑 agent。今天是 {date}。
-使用 web search 搜索并核验近期来源，严格执行下面的项目契约和配置。
-只返回最终 Markdown，不要代码围栏、解释或执行日志。标题日期必须是 {date}。
-每个链接必须来自你实际检索到的页面，禁止编造 URL。
-
---- AGENTS.md ---
-{agents}
-
---- config.md ---
-{config}
-"""
+    prompt = build_prompt(date, agents, config)
     request_body = {
         "model": os.environ.get("OPENAI_MODEL", "gpt-5.4-mini"),
         "tools": [{"type": "web_search"}],
