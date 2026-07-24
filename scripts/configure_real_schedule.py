@@ -73,16 +73,16 @@ def main(argv=None) -> int:
     set_variable(repo, "DISPATCH_ENABLED", "false")
     print("[OK] 凭据和 runner 已配置；定时仍为关闭。")
 
-    previous = run_gh(["run", "list", "--repo", repo, "--workflow", "daily-dispatch.yml",
+    previous = run_gh(["run", "list", "--repo", repo, "--workflow", "prepare-dispatch.yml",
                        "--event", "workflow_dispatch", "--limit", "1", "--json", "databaseId"], capture=True)
     previous_rows = json.loads(previous.stdout)
     previous_id = previous_rows[0]["databaseId"] if previous_rows else None
-    run_gh(["workflow", "run", "daily-dispatch.yml", "--repo", repo,
-            "-f", "mock=false", "-f", "send_email=false"])
+    run_gh(["workflow", "run", "prepare-dispatch.yml", "--repo", repo,
+            "-f", "mock=false"])
     latest = None
     for _ in range(15):
         time.sleep(2)
-        runs = run_gh(["run", "list", "--repo", repo, "--workflow", "daily-dispatch.yml",
+        runs = run_gh(["run", "list", "--repo", repo, "--workflow", "prepare-dispatch.yml",
                        "--event", "workflow_dispatch", "--limit", "1", "--json", "databaseId,url"], capture=True)
         rows = json.loads(runs.stdout)
         if rows and rows[0]["databaseId"] != previous_id:
@@ -97,12 +97,12 @@ def main(argv=None) -> int:
         print("[BLOCK] 真实试跑失败，DISPATCH_ENABLED 仍为 false。请让 agent 检查 Actions 日志。")
         return 3
 
-    confirm_enable = input("真实试跑成功。现在启用每天 07:00（北京时间）运行？[y/N]: ").strip().lower()
+    confirm_enable = input("真实 prepare 试跑成功。现在启用每天 06:20/07:00（北京时间）的双阶段运行？[y/N]: ").strip().lower()
     if confirm_enable not in {"y", "yes"}:
         print("[INFO] 已通过真实试跑，但定时仍保持关闭；以后可重新运行本向导。")
         return 0
     set_variable(repo, "DISPATCH_ENABLED", "true")
-    print("[OK] 已启用每天 07:00（北京时间）的真实简报。")
+    print("[OK] 已启用每天 06:20 准备、07:00 发送（北京时间）的双阶段简报。")
     return 0
 
 

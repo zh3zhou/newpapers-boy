@@ -1,1 +1,1 @@
-edge-tts>=7.0
+-r requirements.lock.txt

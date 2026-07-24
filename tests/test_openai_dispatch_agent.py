@@ -16,7 +16,9 @@ class OpenAIDispatchAgentTests(unittest.TestCase):
 
         self.assertIn("广域 web search", prompt)
         self.assertIn("不得从固定站点抓取或默认只查 MoMA", prompt)
-        self.assertIn("至少覆盖 2 个相互独立的来源/机构", prompt)
+        self.assertIn("默认目标 5 条艺术内容", prompt)
+        self.assertIn("至少 3 个相互独立的", prompt)
+        self.assertIn("同一来源最多 2 条", prompt)
 
     def test_extracts_only_message_output_text(self):
         payload = {

@@ -20,13 +20,14 @@ def build_prompt(date: str, agents: str, config: str) -> str:
 只返回最终 Markdown，不要代码围栏、解释或执行日志。标题日期必须是 {date}。
 每个链接必须来自你实际检索到的页面，禁止编造 URL。
 艺术一刻必须主动做广域 web search，不得从固定站点抓取或默认只查 MoMA。
-每日 2-3 条艺术内容至少覆盖 2 个相互独立的来源/机构，同一来源原则上最多 1 条；
+每日默认目标 5 条艺术内容，质量不足时宁缺毋滥；目标覆盖至少 3 个相互独立的
+来源/机构和域名，同一来源最多 2 条；
 优先轮换可信博物馆、美术馆、艺术节、摄影机构、艺术媒体及艺术家或项目官方页面。
 
 --- AGENTS.md ---
 {agents}
 
---- config.md ---
+--- dispatch.config.json ---
 {config}
 """
 
@@ -73,7 +74,7 @@ def main() -> int:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     date = os.environ.get("DISPATCH_DATE", "").strip()
     output = os.environ.get("DISPATCH_OUTPUT", "").strip()
-    config_name = os.environ.get("DISPATCH_CONFIG", "config.md")
+    config_name = os.environ.get("DISPATCH_CONFIG", "dispatch.config.json")
     if not api_key:
         print("[ERROR] OPENAI_API_KEY is missing.")
         return 2

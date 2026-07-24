@@ -1,0 +1,16 @@
+[project]
+name = "newpapers-boy"
+version = "0.1.0"
+description = "Agent-first academic dispatch with source validation, TTS, and scheduled email delivery."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [{name = "zh3zhou"}]
+dependencies = ["edge-tts>=7.2,<8"]
+
+[project.urls]
+Repository = "https://github.com/zh3zhou/newpapers-boy"
+Issues = "https://github.com/zh3zhou/newpapers-boy/issues"
+
+[tool.unittest]
+start-directory = "tests"

@@ -13,6 +13,12 @@ if ! "$PYTHON_CMD" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,
     exit 1
 fi
 
+if [ -x "$ROOT/.venv/bin/python" ] && ! "$ROOT/.venv/bin/python" --version >/dev/null 2>&1; then
+    BACKUP="$ROOT/.venv.broken-$(date +%Y%m%d-%H%M%S)"
+    printf '%s\n' "[WARN] 现有 .venv 已损坏，保留为 $BACKUP"
+    mv "$ROOT/.venv" "$BACKUP"
+fi
+
 if [ ! -x "$ROOT/.venv/bin/python" ]; then
     printf '%s\n' '[1/4] 创建虚拟环境 .venv ...'
     "$PYTHON_CMD" -m venv "$ROOT/.venv"
@@ -23,7 +29,7 @@ fi
 VENV_PYTHON="$ROOT/.venv/bin/python"
 printf '%s\n' '[2/4] 安装依赖 ...'
 "$VENV_PYTHON" -m pip install --upgrade pip
-"$VENV_PYTHON" -m pip install -r "$ROOT/requirements.txt"
+"$VENV_PYTHON" -m pip install -r "$ROOT/requirements.lock.txt"
 
 printf '%s\n' '[3/4] 准备本地配置与数据目录 ...'
 if [ ! -f "$ROOT/.env" ]; then
@@ -37,4 +43,4 @@ if ! "$VENV_PYTHON" "$ROOT/scripts/project_doctor.py" --root "$ROOT" --target ma
     printf '%s\n' '[WARN] 体检发现阻断项，请按上方 NEXT 提示处理。'
 fi
 
-printf '%s\n' '初始化完成。接下来可让 agent 读取 AGENTS.md/config.md 并运行当天速递。'
+printf '%s\n' '初始化完成。接下来可让 agent 读取 AGENTS.md/dispatch.config.json 并运行当天速递。'

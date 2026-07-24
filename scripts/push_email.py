@@ -126,11 +126,20 @@ def _inline_md(text: str) -> str:
 
 # ============ 邮件发送 ============
 
-def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path: Path) -> bool:
+def push_email(
+    env: dict,
+    title: str,
+    body_summary: str,
+    md_path: Path,
+    mp3_path: Path,
+    *,
+    result: dict | None = None,
+) -> bool:
     import smtplib
     from email.mime.application import MIMEApplication
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+    from email.utils import make_msgid
     import html as html_mod
 
     host = env.get("SMTP_HOST")
@@ -153,6 +162,8 @@ def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path
         msg["From"] = user
         msg["To"] = to_addr
         msg["Subject"] = title
+        message_id = make_msgid(domain="academic-dispatch.local")
+        msg["Message-ID"] = message_id
 
         body_html = f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:700px;margin:0 auto;padding:20px;">
@@ -185,10 +196,66 @@ def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path
         server.login(user, password)
         server.sendmail(user, [to_addr], msg.as_string())
         server.quit()
-        print(f"[邮件] 成功发送至 {to_addr}")
+        print("[邮件] 发送成功（收件人已隐藏）")
+        if result is not None:
+            result.update({"status": "sent", "messageId": message_id})
         return True
     except Exception as e:
         print(f"[邮件] 异常: {e}")
+        if result is not None:
+            result.update({"status": "failed", "errorType": type(e).__name__})
+        return False
+
+
+def push_failure_email(env: dict, date_str: str, error_code: str, detail: str, *, result: dict | None = None) -> bool:
+    import html
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.utils import make_msgid
+
+    host = env.get("SMTP_HOST")
+    user = env.get("SMTP_USER")
+    password = env.get("SMTP_PASS")
+    to_addr = env.get("MAIL_TO")
+    try:
+        port = int(env.get("SMTP_PORT") or "465")
+    except ValueError:
+        return False
+    if not all([host, user, password, to_addr]):
+        return False
+    safe_code = re.sub(r"[^A-Za-z0-9_.-]", "_", error_code)[:80]
+    safe_detail = re.sub(r"[A-Za-z]:\\[^\s]+|/[^\s]+", "[local evidence]", detail)[:300]
+    message_id = make_msgid(domain="academic-dispatch.local")
+    msg = MIMEMultipart("alternative")
+    msg["From"] = user
+    msg["To"] = to_addr
+    msg["Subject"] = f"⚠️ 学术速递未发送 — {date_str}"
+    msg["Message-ID"] = message_id
+    text = f"{date_str} 的学术速递未通过交付门。\n错误代码：{safe_code}\n摘要：{safe_detail}\n未发送旧内容或附件。"
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    msg.attach(
+        MIMEText(
+            f"<h2>学术速递未发送</h2><p>{html.escape(date_str)} 的工件未通过交付门。</p>"
+            f"<p>错误代码：<code>{html.escape(safe_code)}</code></p>"
+            f"<p>{html.escape(safe_detail)}</p><p>未发送旧内容或附件。</p>",
+            "html",
+            "utf-8",
+        )
+    )
+    try:
+        server = smtplib.SMTP_SSL(host, port, timeout=30) if port == 465 else smtplib.SMTP(host, port, timeout=30)
+        if port != 465:
+            server.starttls()
+        server.login(user, password)
+        server.sendmail(user, [to_addr], msg.as_string())
+        server.quit()
+        if result is not None:
+            result.update({"status": "failure_notified", "messageId": message_id})
+        return True
+    except Exception as exc:
+        if result is not None:
+            result.update({"status": "notification_failed", "errorType": type(exc).__name__})
         return False
 
 

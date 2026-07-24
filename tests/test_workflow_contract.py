@@ -1,40 +1,36 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 from __future__ import annotations
 
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "daily-dispatch.yml"
+PREPARE = (ROOT / ".github" / "workflows" / "prepare-dispatch.yml").read_text(encoding="utf-8")
+DELIVER = (ROOT / ".github" / "workflows" / "deliver-dispatch.yml").read_text(encoding="utf-8")
 
 
 class WorkflowContractTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.text = WORKFLOW.read_text(encoding="utf-8")
-        cls.generate, cls.deliver = cls.text.split("\n  deliver:\n", 1)
+    def test_schedules_are_explicit_utc_times(self):
+        self.assertIn('cron: "20 22 * * *"', PREPARE)
+        self.assertIn('cron: "0 23 * * *"', DELIVER)
 
-    def test_schedule_requires_explicit_enable(self):
-        self.assertIn("vars.DISPATCH_ENABLED == 'true'", self.generate)
+    def test_schedules_require_explicit_enable(self):
+        self.assertIn("vars.DISPATCH_ENABLED == 'true'", PREPARE)
+        self.assertIn("vars.DISPATCH_ENABLED == 'true'", DELIVER)
 
-    def test_schedule_leaves_time_for_seven_am_delivery(self):
-        self.assertIn('cron: "30 22 * * *"', self.generate)
-        self.assertIn("finish around 07:00", self.generate)
-
-    def test_generate_has_no_smtp_environment(self):
+    def test_prepare_has_no_smtp_secrets(self):
         for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_TO"):
-            self.assertNotIn(name, self.generate)
+            self.assertNotIn(name, PREPARE)
 
-    def test_delivery_keeps_tts_and_email_separate(self):
-        self.assertIn('run_daily.py "$DISPATCH_DATE" --skip-email', self.deliver)
-        self.assertIn('push_email.py "$DISPATCH_DATE" --strict', self.deliver)
-        self.assertIn("needs.generate.outputs.send_email == 'true'", self.deliver)
+    def test_prepare_seals_and_deliver_rechecks(self):
+        self.assertIn("finalize_dispatch.py", PREPARE)
+        self.assertIn("deliver_ready.py", DELIVER)
+        self.assertIn("dispatch-ready-${{ steps.metadata.outputs.date }}", PREPARE)
+        self.assertIn("--name \"dispatch-ready-${{ steps.metadata.outputs.date }}\"", DELIVER)
 
-    def test_generate_uses_strict_link_validation(self):
-        self.assertIn("--strict", self.generate)
-        self.assertIn("--check-links", self.generate)
+    def test_deliver_uses_successful_default_branch_prepare_run(self):
+        self.assertIn("--workflow prepare-dispatch.yml", DELIVER)
+        self.assertIn("--branch \"$DEFAULT_BRANCH\"", DELIVER)
+        self.assertIn("--status success", DELIVER)
 
 
 if __name__ == "__main__":

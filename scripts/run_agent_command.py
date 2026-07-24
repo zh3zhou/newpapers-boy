@@ -8,16 +8,19 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 try:
     from .dispatch_config import parse_config_fields
     from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
     from .env_utils import load_env
+    from .run_events import append_event
 except ImportError:  # Direct script execution: python scripts/run_agent_command.py
     from dispatch_config import parse_config_fields
     from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
     from env_utils import load_env
+    from run_events import append_event
 
 WORK_DIR = Path(__file__).resolve().parent.parent
 
@@ -61,7 +64,7 @@ FORBIDDEN_AGENT_ENV = {"MAIL_TO"}
 
 
 def build_mock_markdown(date_str: str, config_path: Path | None = None) -> str:
-    fields = parse_config_fields(config_path or WORK_DIR / "config.md")
+    fields = parse_config_fields(config_path or WORK_DIR / "dispatch.config.json")
     if not fields:
         fields = []
 
@@ -167,10 +170,13 @@ def main(argv=None) -> int:
         return 2
 
     artifacts = project.artifacts(date_str)
+    event_log = project.data / "runs.jsonl"
+    started = time.monotonic()
+    append_event(event_log, date_str, "generation_started", "running")
     configured_output = args.output or (Path(env["DISPATCH_OUTPUT"]) if env.get("DISPATCH_OUTPUT") else None)
     output_path = resolve_from_root(configured_output, project.root, artifacts.markdown)
     log_path = resolve_from_root(args.log, project.root, artifacts.agent_log)
-    config_setting = args.config or Path(env.get("DISPATCH_CONFIG", "config.md"))
+    config_setting = args.config or Path(env.get("DISPATCH_CONFIG", "dispatch.config.json"))
     config_path = resolve_from_root(config_setting, project.root, project.config)
     config_contract = str(config_setting)
 
@@ -182,14 +188,19 @@ def main(argv=None) -> int:
     if mock:
         output_path.write_text(build_mock_markdown(date_str, config_path), encoding="utf-8")
         log_path.write_text(f"mock agent runner wrote {output_path}\n", encoding="utf-8")
+        append_event(
+            event_log, date_str, "generated", "ok", mock=True,
+            durationMs=round((time.monotonic() - started) * 1000),
+        )
         print(f"[OK] mock agent runner wrote Markdown: {output_path}")
         return 0
 
     command = env.get("AGENT_RUNNER_CMD", "").strip()
     if not command:
+        append_event(event_log, date_str, "generated", "failed", errorCode="missing_agent_runner")
         print("[ERROR] AGENT_RUNNER_CMD is not set.")
         print("[ERROR] Configure it as a GitHub Actions repository variable/secret, or run with --mock for smoke tests.")
-        print("[INFO] Without a runner, open this project in any capable agent and ask it to read AGENTS.md and config.md.")
+        print("[INFO] Without a runner, open this project in any capable agent and ask it to read AGENTS.md and dispatch.config.json.")
         return 2
 
     try:
@@ -244,6 +255,10 @@ def main(argv=None) -> int:
         print(safe_output)
 
     if result.returncode != 0:
+        append_event(
+            event_log, date_str, "generated", "failed", errorCode="agent_nonzero",
+            durationMs=round((time.monotonic() - started) * 1000),
+        )
         temporary_output.unlink(missing_ok=True)
         print(f"[ERROR] agent command failed with exit code {result.returncode}")
         return result.returncode
@@ -265,6 +280,10 @@ def main(argv=None) -> int:
         return 5
 
     temporary_output.replace(output_path)
+    append_event(
+        event_log, date_str, "generated", "ok",
+        durationMs=round((time.monotonic() - started) * 1000),
+    )
 
     print(f"[OK] agent output ready: {output_path}")
     print(f"[INFO] agent log: {log_path}")

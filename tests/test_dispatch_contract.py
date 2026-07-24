@@ -162,7 +162,8 @@ class DispatchContractTests(unittest.TestCase):
             )
 
         self.assertEqual(report["errors"], [])
-        self.assertEqual(len(report["warnings"]), 3)
+        link_warnings = [warning for warning in report["warnings"] if warning.startswith("link ")]
+        self.assertEqual(len(link_warnings), 3)
 
     def test_link_check_rejects_private_and_local_targets(self):
         for url in ("http://127.0.0.1/", "http://169.254.169.254/latest/meta-data/", "http://localhost/"):
@@ -294,7 +295,7 @@ class DispatchContractTests(unittest.TestCase):
             report = validate_dispatch("2026-07-04", md, config, strict=True)
 
         self.assertIn(
-            "art section must use at least 2 distinct sources and domains when it contains 2 or more items",
+            "art section must use at least 2 distinct sources and domains when it contains 2 items",
             report["errors"],
         )
 
@@ -316,9 +317,53 @@ class DispatchContractTests(unittest.TestCase):
             report = validate_dispatch("2026-07-04", md, config, strict=True)
 
         self.assertNotIn(
-            "art section must use at least 2 distinct sources and domains when it contains 2 or more items",
+            "art section must use at least 2 distinct sources and domains when it contains 2 items",
             report["errors"],
         )
+
+    def test_strict_validator_reports_five_item_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.md"
+            md = root / "2026-07-04_学术速递.md"
+            config.write_text(CONFIG, encoding="utf-8")
+            md.write_text(VALID_MD, encoding="utf-8")
+            report = validate_dispatch("2026-07-04", md, config, strict=True)
+
+        self.assertIn("art section has 1 items, below default target 5", report["warnings"])
+
+    def test_strict_validator_limits_items_per_art_source(self):
+        extra_arts = """- **Artwork Test Two** — Museum
+  简介：同一来源的第二条内容。
+  https://example.com/art-two
+
+- **Artwork Test Three** — Museum
+  简介：同一来源的第三条内容。
+  https://example.com/art-three
+
+- **Artwork Test Four** — Art Festival
+  简介：来自艺术节的内容。
+  https://festival.example/art-four
+
+- **Artwork Test Five** — Gallery
+  简介：来自画廊的内容。
+  https://gallery.example/art-five
+
+"""
+        over_concentrated_md = VALID_MD.replace("### 会心一笑", extra_arts + "### 会心一笑")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "config.md"
+            md = root / "2026-07-04_学术速递.md"
+            config.write_text(CONFIG, encoding="utf-8")
+            md.write_text(over_concentrated_md, encoding="utf-8")
+            report = validate_dispatch("2026-07-04", md, config, strict=True)
+
+        self.assertIn(
+            "art section must use no more than 2 items per source and domain",
+            report["errors"],
+        )
+        self.assertNotIn("art section has 5 items, below default target 5", report["warnings"])
 
 
 if __name__ == "__main__":

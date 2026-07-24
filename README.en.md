@@ -1,63 +1,68 @@
-# The Academic Dispatch That Likes a Detour
+# Academic Dispatch, with Detours
 
-[中文（默认）](README.md) · **English**
+An agent-first academic briefing that searches the open web, validates sources, seals an auditable dispatch at 06:20 China Standard Time, and delivers Markdown plus Chinese TTS at 07:00 only after rechecking artifact hashes.
 
-This project collects recent academic work, adds a small art and humor detour, and produces a Markdown digest, Chinese TTS audio, and an optional email. Agents handle research and editing; deterministic scripts handle validation, link checks, TTS, email, and run evidence.
+[中文](README.md) · [Sample](examples/sample-dispatch.md) · [Configuration](docs/CONFIGURATION.md) · [Deployment](docs/DEPLOYMENT.md) · [Operations](docs/OPERATIONS.md)
 
-## Recommended: ask an agent to deploy it
+It is for readers who want papers, open-source releases, and official technical updates without maintaining a fragile chain of search, summarization, speech, and email scripts. A web-capable agent makes editorial decisions; deterministic programs validate, synthesize, deliver exactly once, and retain evidence.
 
-The easiest and safest setup path is to open this repository in an agent that can read files and run terminal commands, then say:
-
-```text
-Read AGENTS.md, README.md, and config.md, then help me deploy this project. Continue in English. Inspect the current environment first, explain the local and scheduled options, and configure the option that fits this environment. Do not ask me to paste passwords or API keys into chat, and do not enable cloud schedules or change GitHub settings without confirmation.
+```mermaid
+flowchart LR
+    A["06:20 CST<br/>Agent web search"] --> B["Structure and link validation"]
+    B --> C["TTS + SHA-256"]
+    C --> D["ready manifest"]
+    D --> E["07:00 CST<br/>date/age/hash gate"]
+    E -->|valid and unsent| F["SMTP delivery"]
+    E -->|missing, stale, or changed| G["short failure notice<br/>never yesterday's edition"]
+    F --> H["sent receipt"]
 ```
 
-The agent will inspect Python, the virtual environment, email/TTS settings, GitHub state, and available automation features. It must pause when you need to choose a deployment route or enter a secret. Chinese is the default interaction language; English is available when requested. Dispatch content still follows the language setting in `config.md`.
+## Quick Start
 
-To generate one dispatch immediately, ask:
-
-```text
-Read AGENTS.md and config.md, then run today's academic dispatch. Continue in English.
-```
-
-## Manual installation (optional)
-
-Windows PowerShell:
+Python 3.9+ is supported; 3.12 is recommended.
 
 ```powershell
-git clone <your-repo-url>
-cd <repo-dir>
+git clone https://github.com/zh3zhou/newpapers-boy.git
+cd newpapers-boy
 .\setup.ps1
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target manual
 ```
 
-Linux or macOS:
+Edit `dispatch.config.json`, add SMTP credentials to the untracked `.env`, then ask a web-search-capable agent:
 
-```bash
-git clone <your-repo-url>
-cd <repo-dir>
-sh setup.sh
+```text
+Read AGENTS.md and dispatch.config.json, generate today's real dispatch,
+and run scripts/finalize_dispatch.py. Do not send email.
 ```
 
-Local configuration is stored in the untracked `.env` file. Never commit SMTP passwords or API keys. The main commands are:
+At delivery time:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\project_doctor.py --target manual
-.\.venv\Scripts\python.exe scripts\validate_dispatch.py YYYY-MM-DD --strict --check-links
-.\.venv\Scripts\python.exe run_daily.py YYYY-MM-DD
+.\.venv\Scripts\python.exe scripts\deliver_ready.py 2026-07-24
 ```
 
-On Linux/macOS, use `.venv/bin/python` instead. For detailed configuration, automation, GitHub Actions, privacy rules, and the repository layout, see the default [Chinese README](README.md); the executable agent contract is [AGENTS.md](AGENTS.md).
+Use `sh setup.sh` and `.venv/bin/python` on Linux/macOS.
 
-## Deployment choices
+## Delivery guarantees
 
-| Route | Runs on | Explicit API key | Best for |
-| --- | --- | --- | --- |
-| Interactive agent | Your current agent session | Usually no | Setup, testing, and on-demand dispatches |
-| Desktop-agent automation | Your computer | Usually no | Scheduled personal use when the app supports native automation |
-| GitHub Actions + provider API | GitHub | Yes | Cloud scheduling that continues while your computer is off |
+- `dispatch.config.json` is the canonical machine configuration. Legacy `config.md` parsing remains for one release with a migration warning.
+- Effective priority is CLI → allowed environment override → JSON → safe built-in default. Secrets remain in `.env` or GitHub Secrets.
+- Finalization validates structure, history, source diversity, and link verdicts before writing an atomic ready manifest.
+- Delivery verifies date, freshness, size, and SHA-256, and refuses duplicate sends unless `--force` is explicit.
+- A missing, expired, or modified artifact triggers a short attachment-free failure notice. Old content is never substituted.
+- Structured JSONL events and sent receipts retain operational evidence without storing recipients, message bodies, passwords, or tokens.
 
-GitHub cannot inherit a local Codex or desktop-agent login. Keep `DISPATCH_ENABLED=false` until a real non-interactive runner and its credentials have passed a test run.
+GitHub and desktop scheduling both use explicit UTC times: 22:20 UTC for preparation and 23:00 UTC for delivery. GitHub schedules remain disabled by default.
 
-## License
+## Verification
 
-MIT
+```powershell
+.\.venv\Scripts\python.exe scripts\validate_config.py
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe scripts\project_doctor.py --target manual --json
+git diff --check
+```
+
+Tests demonstrate the delivery contract and failure gates. They do not prove long-term punctuality; that claim requires accumulating real production events and receipts.
+
+See the [technical report](TECH_REPORT.md), [security policy](SECURITY.md), [contribution guide](CONTRIBUTING.md), and [v0.1.0 notes](docs/releases/v0.1.0.md). MIT licensed.

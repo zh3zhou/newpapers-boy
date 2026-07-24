@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import http.client
 import ipaddress
 import json
@@ -12,16 +13,18 @@ import re
 import socket
 import ssl
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 try:
-    from .dispatch_config import FieldSpec, parse_config_fields, parse_count_spec
+    from .content_history import extract_content_entries, history_findings, load_history
+    from .dispatch_config import FieldSpec, load_dispatch_config, parse_config_fields, parse_count_spec
     from .dispatch_markdown import parse_markdown
     from .dispatch_paths import ProjectPaths, resolve_from_root
 except ImportError:  # Direct script execution: python scripts/validate_dispatch.py
-    from dispatch_config import FieldSpec, parse_config_fields, parse_count_spec
+    from content_history import extract_content_entries, history_findings, load_history
+    from dispatch_config import FieldSpec, load_dispatch_config, parse_config_fields, parse_count_spec
     from dispatch_markdown import parse_markdown
     from dispatch_paths import ProjectPaths, resolve_from_root
 
@@ -42,17 +45,27 @@ def extract_urls(text: str) -> list[str]:
 
 def classify_http_status(url: str, status: int) -> dict:
     if 200 <= status < 400:
-        return {"url": url, "level": "ok", "http_status": status, "message": "reachable"}
-    if status in {403, 429} or status >= 500:
+        return {"url": url, "level": "ok", "verdict": "reachable", "http_status": status, "message": "reachable"}
+    if status in {401, 403}:
         return {
             "url": url,
             "level": "warning",
+            "verdict": "bot_blocked",
             "http_status": status,
-            "message": f"remote server returned HTTP {status}",
+            "message": f"public server blocked automated verification with HTTP {status}",
+        }
+    if status == 429 or status >= 500:
+        return {
+            "url": url,
+            "level": "warning",
+            "verdict": "transient",
+            "http_status": status,
+            "message": f"remote server returned transient HTTP {status}",
         }
     return {
         "url": url,
         "level": "error",
+        "verdict": "dead",
         "http_status": status,
         "message": f"remote server returned HTTP {status}",
     }
@@ -130,7 +143,13 @@ def build_fixed_connection(parsed, ip: str, timeout: float):
 def request_once(url: str, method: str, timeout: float, resolver, connection_builder):
     level, reason, parsed, public_ips = resolve_public_target(url, resolver=resolver)
     if level != "ok":
-        return None, None, {"url": url, "level": level, "http_status": None, "message": reason}
+        return None, None, {
+            "url": url,
+            "level": level,
+            "verdict": "unsafe" if "not allowed" in reason or "local" in reason else ("dead" if level == "error" else "transient"),
+            "http_status": None,
+            "message": reason,
+        }
 
     connection = connection_builder(parsed, public_ips[0], timeout)
     target = parsed.path or "/"
@@ -151,6 +170,7 @@ def request_once(url: str, method: str, timeout: float, resolver, connection_bui
         return None, None, {
             "url": url,
             "level": "error",
+            "verdict": "dead",
             "http_status": None,
             "message": f"TLS certificate validation failed: {exc}",
         }
@@ -158,6 +178,7 @@ def request_once(url: str, method: str, timeout: float, resolver, connection_bui
         return None, None, {
             "url": url,
             "level": "warning",
+            "verdict": "transient",
             "http_status": None,
             "message": f"temporary network failure: {exc}",
         }
@@ -186,6 +207,7 @@ def check_url(
             if failure:
                 failure["url"] = url
                 failure["final_url"] = current_url
+                failure["method"] = method
                 return failure
             if status == 405 and method == "HEAD":
                 continue
@@ -195,12 +217,19 @@ def check_url(
                 break
             result = classify_http_status(url, status)
             result["final_url"] = current_url
+            result["method"] = method
             return result
         if redirected:
             continue
-        return {"url": url, "level": "error", "http_status": 405, "message": "URL rejected HEAD and GET"}
+        return {
+            "url": url, "level": "error", "verdict": "dead", "http_status": 405,
+            "method": "HEAD+GET", "message": "URL rejected HEAD and GET",
+        }
 
-    return {"url": url, "level": "error", "http_status": None, "message": "too many redirects"}
+    return {
+        "url": url, "level": "error", "verdict": "dead", "http_status": None,
+        "method": "HEAD+GET", "message": "too many redirects",
+    }
 
 
 def check_urls(urls: list[str], timeout: float = 8.0, checker=None) -> list[dict]:
@@ -281,6 +310,7 @@ def validate_dispatch(
     check_links: bool = False,
     link_timeout: float = 8.0,
     link_checker=None,
+    history_path: Path | None = None,
 ) -> dict:
     report = {
         "date": date_str,
@@ -295,6 +325,9 @@ def validate_dispatch(
         "links": [],
         "errors": [],
         "warnings": [],
+        "verifiedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "sourceDomains": {},
+        "history": {"duplicates": [], "warnings": []},
     }
 
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
@@ -330,9 +363,14 @@ def validate_dispatch(
         report["errors"].append("TTS parser found no academic sections")
 
     sections, diversion = split_markdown_sections(md_text)
-    fields = parse_config_fields(config_path)
+    try:
+        config = load_dispatch_config(config_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        config = None
+        report["errors"].append(f"configuration is invalid: {exc}")
+    fields = config.fields if config else []
     if strict and not fields:
-        report["errors"].append("strict mode requires config.md academic field rows")
+        report["errors"].append("strict mode requires configured academic fields")
 
     for field in fields:
         section_text = sections.get(field.name)
@@ -391,13 +429,28 @@ def validate_dispatch(
                 else:
                     host = (urlsplit(block_urls[0]).hostname or "").lower()
                     art_hosts.append(host.removeprefix("www."))
-            if (
-                len(art_blocks) >= 2
-                and (len(set(art_sources)) < 2 or len(set(art_hosts)) < 2)
+            art_policy = config.art if config else {}
+            target_items = int(art_policy.get("targetItems", 5))
+            minimum_sources = int(art_policy.get("minimumDistinctSources", 3))
+            maximum_per_source = int(art_policy.get("maximumItemsPerSource", 2))
+            if len(art_blocks) < target_items:
+                report["warnings"].append(
+                    f"art section has {len(art_blocks)} items, below default target {target_items}"
+                )
+            required_distinct = min(minimum_sources, len(art_blocks))
+            if len(art_blocks) >= 2 and (
+                len(set(art_sources)) < required_distinct
+                or len(set(art_hosts)) < required_distinct
             ):
                 report["errors"].append(
-                    "art section must use at least 2 distinct sources and domains "
-                    "when it contains 2 or more items"
+                    f"art section must use at least {required_distinct} distinct sources "
+                    f"and domains when it contains {len(art_blocks)} items"
+                )
+            if any(count > maximum_per_source for count in Counter(art_sources).values()) or any(
+                count > maximum_per_source for count in Counter(art_hosts).values()
+            ):
+                report["errors"].append(
+                    f"art section must use no more than {maximum_per_source} items per source and domain"
                 )
 
     report["arts"] = len(parsed.get("arts", []))
@@ -409,6 +462,27 @@ def validate_dispatch(
 
     urls = extract_urls(md_text)
     report["url_count"] = len(urls)
+    entries = extract_content_entries(md_text, date_str)
+    report["sourceDomains"] = dict(Counter(entry["domain"] for entry in entries if entry.get("domain")))
+    if history_path:
+        raw_history = load_history(history_path)
+        history_config = (config.raw.get("history", {}) if config else {})
+        findings = history_findings(
+            entries,
+            raw_history,
+            date_str,
+            duplicate_days=int(history_config.get("duplicateWindowDays", 30)),
+            diversity_days=int(history_config.get("diversityWindowDays", 7)),
+        )
+        report["history"] = {
+            "duplicates": [
+                {"title": entry.get("title"), "url": entry.get("url")} for entry in findings["duplicates"]
+            ],
+            "warnings": findings["warnings"],
+        }
+        for duplicate in report["history"]["duplicates"]:
+            report["errors"].append(f"duplicate content in history: {duplicate['title'] or duplicate['url']}")
+        report["warnings"].extend(findings["warnings"])
     if strict and not urls:
         report["errors"].append("strict mode requires at least one URL")
 
@@ -434,6 +508,7 @@ def main(argv=None) -> int:
     parser.add_argument("--markdown", type=Path, help="Markdown 文件；相对路径基于项目根目录。")
     parser.add_argument("--config", type=Path, help="配置文件；相对路径基于项目根目录。")
     parser.add_argument("--report", type=Path, help="JSON 报告；相对路径基于项目根目录。")
+    parser.add_argument("--history", type=Path, help="历史 JSONL；默认 data/content-history.jsonl。")
     args = parser.parse_args(argv)
 
     project = ProjectPaths.from_root(args.root)
@@ -442,6 +517,7 @@ def main(argv=None) -> int:
     md_path = resolve_from_root(args.markdown, project.root, default_markdown)
     config_path = resolve_from_root(args.config, project.root, project.config)
     report_path = resolve_from_root(args.report, project.root, default_report)
+    history_path = resolve_from_root(args.history, project.root, project.data / "content-history.jsonl")
     report = validate_dispatch(
         args.date,
         md_path,
@@ -449,6 +525,7 @@ def main(argv=None) -> int:
         args.strict,
         check_links=args.check_links,
         link_timeout=args.link_timeout,
+        history_path=history_path,
     )
 
     report_path.parent.mkdir(parents=True, exist_ok=True)

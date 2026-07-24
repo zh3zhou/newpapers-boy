@@ -24,10 +24,12 @@ from datetime import datetime
 from pathlib import Path
 
 try:
+    from .dispatch_config import load_dispatch_config
     from .dispatch_markdown import clean_text, parse_markdown
     from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
     from .env_utils import load_env
 except ImportError:  # Direct script execution: python scripts/tts_generate.py
+    from dispatch_config import load_dispatch_config
     from dispatch_markdown import clean_text, parse_markdown
     from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
     from env_utils import load_env
@@ -151,6 +153,8 @@ def main(argv=None) -> int:
     parser.add_argument("--markdown", type=Path, help="输入 Markdown；相对路径基于项目根目录。")
     parser.add_argument("--mp3", type=Path, help="输出 MP3；相对路径基于项目根目录。")
     parser.add_argument("--transcript", type=Path, help="输出朗读稿；相对路径基于项目根目录。")
+    parser.add_argument("--voice", help="TTS voice；优先于环境变量和 JSON 配置。")
+    parser.add_argument("--rate", help="TTS rate；优先于环境变量和 JSON 配置。")
     args = parser.parse_args(argv)
 
     project = ProjectPaths.from_root(args.root)
@@ -166,8 +170,12 @@ def main(argv=None) -> int:
     txt_path.parent.mkdir(parents=True, exist_ok=True)
 
     env = load_env(project.root)
-    voice = env.get("TTS_VOICE", DEFAULT_VOICE)
-    rate = env.get("TTS_RATE", DEFAULT_RATE)
+    try:
+        tts_config = load_dispatch_config(project.config).raw.get("tts", {})
+    except (OSError, ValueError):
+        tts_config = {}
+    voice = args.voice or env.get("TTS_VOICE") or tts_config.get("voice") or DEFAULT_VOICE
+    rate = args.rate or env.get("TTS_RATE") or tts_config.get("rate") or DEFAULT_RATE
     if not md_path.exists():
         print(f"[ERROR] Markdown 文件不存在: {md_path}", file=sys.stderr)
         return 1

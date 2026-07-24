@@ -1,0 +1,66 @@
+{
+  "$schema": "./dispatch.config.schema.json",
+  "schemaVersion": 1,
+  "content": {
+    "academicFields": [
+      {
+        "name": "复杂系统",
+        "keywords": ["complex systems", "网络", "涌现", "多智能体动力学"],
+        "items": {"min": 3, "max": 5}
+      },
+      {
+        "name": "AI4S / S4AI",
+        "keywords": ["AI for Science", "Science for AI"],
+        "items": {"min": 3, "max": 5}
+      },
+      {
+        "name": "AI 基础与大模型",
+        "keywords": ["foundation models", "训练", "推理优化", "评测", "对齐"],
+        "items": {"min": 3, "max": 5}
+      },
+      {
+        "name": "Agent / harness 工程",
+        "keywords": ["agent 框架", "工具调用", "评测 harness", "工程实践"],
+        "items": {"min": 3, "max": 5}
+      }
+    ],
+    "academicSources": {
+      "preferred": ["arXiv", "GitHub", "Hugging Face", "Papers with Code", "official release"],
+      "rollingWindowDays": 7,
+      "minimumDistinctDomains": 2,
+      "enforcement": "warning"
+    },
+    "art": {
+      "targetItems": 5,
+      "minimumDistinctSources": 3,
+      "maximumItemsPerSource": 2,
+      "preferences": ["艺术摄影", "数字艺术", "行为艺术", "当代装置", "插画"]
+    },
+    "humor": {"minItems": 1, "maxItems": 2},
+    "freshness": {
+      "defaultHours": 24,
+      "fallbackHours": 48,
+      "artAndHumor": "recent"
+    },
+    "language": "zh-CN"
+  },
+  "schedule": {
+    "timezone": "Asia/Shanghai",
+    "prepareAt": "06:20",
+    "deliverAt": "07:00",
+    "readyMaxAgeMinutes": 60
+  },
+  "delivery": {
+    "channel": "smtp",
+    "failurePolicy": "notify",
+    "preventDuplicateSend": true
+  },
+  "tts": {
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+0%"
+  },
+  "history": {
+    "duplicateWindowDays": 30,
+    "diversityWindowDays": 7
+  }
+}

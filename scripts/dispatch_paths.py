@@ -33,6 +33,8 @@ class DispatchArtifacts:
     transcript: Path
     validation: Path
     agent_log: Path
+    ready: Path
+    sent: Path
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,10 @@ class ProjectPaths:
 
     @property
     def config(self) -> Path:
+        return self.root / "dispatch.config.json"
+
+    @property
+    def legacy_config(self) -> Path:
         return self.root / "config.md"
 
     @property
@@ -71,4 +77,6 @@ class ProjectPaths:
             transcript=self.data / f"{date_str}_播报稿.txt",
             validation=self.data / f"{date_str}_validation.json",
             agent_log=self.data / f"{date_str}_agent.log",
+            ready=self.data / f"{date_str}_ready.json",
+            sent=self.data / f"{date_str}_sent.json",
         )

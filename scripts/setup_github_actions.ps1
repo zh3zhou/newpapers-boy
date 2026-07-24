@@ -201,17 +201,18 @@ if ($upstream) {
     Write-Status "WARN" "当前分支没有上游。push 前可能需要设置 upstream。"
 }
 
-$workflowPath = Join-Path $WorkDir ".github\workflows\daily-dispatch.yml"
-if (Test-Path $workflowPath) {
-    Write-Status "OK" "workflow 文件存在: .github/workflows/daily-dispatch.yml"
+$workflowPaths = @(".github/workflows/prepare-dispatch.yml", ".github/workflows/deliver-dispatch.yml")
+$missingWorkflows = @($workflowPaths | Where-Object { -not (Test-Path (Join-Path $WorkDir $_)) })
+if ($missingWorkflows.Count -eq 0) {
+    Write-Status "OK" "prepare/deliver workflow 文件均存在。"
 } else {
-    Write-Status "BLOCK" "未找到 workflow 文件: .github/workflows/daily-dispatch.yml"
+    Write-Status "BLOCK" "缺少 workflow 文件: $($missingWorkflows -join ', ')"
     $canTriggerMock = $false
 }
 
-$trackedWorkflowOutput = Get-CommandText @("git", "ls-files", ".github/workflows/daily-dispatch.yml")
-if ($trackedWorkflowOutput) {
-    Write-Status "OK" "workflow 文件已被 Git 跟踪。"
+$trackedWorkflowOutput = @($workflowPaths | Where-Object { Get-CommandText @("git", "ls-files", "--error-unmatch", $_) })
+if ($trackedWorkflowOutput.Count -eq $workflowPaths.Count) {
+    Write-Status "OK" "prepare/deliver workflow 均已被 Git 跟踪。"
 } else {
     Write-Status "WARN" "workflow 文件还没有被 Git 跟踪/提交；GitHub Actions 页面暂时不会出现它。"
     $canTriggerMock = $false
@@ -446,11 +447,13 @@ if (-not $NonInteractive -and -not $TriggerMock) {
     $shouldTriggerMock = Confirm-Step "要现在触发一次 GitHub Actions mock 测试吗？"
 }
 if ($shouldTriggerMock) {
-    $sendEmailValue = if ($SendEmailMock) { "true" } else { "false" }
-    Invoke-Gh -GhPath $ghPath -Arguments @("workflow", "run", "daily-dispatch.yml", "--repo", $Repo, "-f", "mock=true", "-f", "send_email=$sendEmailValue")
+    Invoke-Gh -GhPath $ghPath -Arguments @("workflow", "run", "prepare-dispatch.yml", "--repo", $Repo, "-f", "mock=true")
     if ($LASTEXITCODE -ne 0) { throw "触发 workflow 失败。请确认 workflow 已经 push 到 GitHub。" }
-    Write-Status "OK" "已触发 mock workflow（send_email=$sendEmailValue）。"
+    Write-Status "OK" "已触发 mock prepare workflow（不会接触 SMTP）。"
+    if ($SendEmailMock) {
+        Write-Status "WARN" "双阶段模式不自动串联测试邮件；prepare 成功后请手动触发 deliver-dispatch.yml 并勾选 test_label。"
+    }
     Write-Host "查看状态:"
-    Write-Host "  gh run list --repo $Repo --workflow daily-dispatch.yml"
+    Write-Host "  gh run list --repo $Repo --workflow prepare-dispatch.yml"
     Write-Host "  或打开: https://github.com/$Repo/actions"
 }

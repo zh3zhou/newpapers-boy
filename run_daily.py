@@ -6,10 +6,7 @@ run_daily.py — 会打岔的学术速递：后处理主入口
 用法：
     python run_daily.py [YYYY-MM-DD]
 
-功能：
-    1. 检查环境（venv、依赖）
-    2. 运行 TTS 生成 MP3 播报
-    3. 发送邮件推送（含 MP3 附件）
+兼容入口：内部委托给 finalize_dispatch.py 和 deliver_ready.py。
 
 注意：
     学术内容采集（WebSearch + AI 筛选）需要由 AI agent 完成。
@@ -95,8 +92,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="会打岔的学术速递后处理入口。")
     parser.add_argument("date", nargs="?", help="日期，格式 YYYY-MM-DD。")
     parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
-    parser.add_argument("--strict-email", action="store_true", help="邮件失败时返回非零退出码。")
-    parser.add_argument("--skip-email", action="store_true", help="只生成 TTS，不发送邮件。")
+    parser.add_argument("--strict-email", action="store_true", help="兼容参数；两阶段交付始终严格处理邮件失败。")
+    parser.add_argument("--skip-email", action="store_true", help="只 finalize，不发送邮件。")
     args = parser.parse_args(argv)
 
     project = ProjectPaths.from_root(args.root)
@@ -106,8 +103,6 @@ def main(argv=None):
         date_str = resolve_dispatch_date(args.date)
     except ValueError as exc:
         parser.error(str(exc))
-    strict_email = args.strict_email or os.environ.get("DISPATCH_MODE") == "ci"
-
     artifacts = project.artifacts(date_str)
     md_path = artifacts.markdown
     if not md_path.exists():
@@ -116,12 +111,12 @@ def main(argv=None):
         print(f"  详细工作流见 AGENTS.md。")
         sys.exit(1)
 
-    print(f"会打岔的学术速递 — 后处理")
+    print(f"会打岔的学术速递 — 两阶段兼容入口")
     print(f"日期: {date_str}")
     print(f"Markdown: {md_path}")
 
     python_executable = select_python(project.root)
-    ok1 = run_step(project, python_executable, "tts_generate.py", date_str, "[1/2] 生成语音播报")
+    ok1 = run_step(project, python_executable, "finalize_dispatch.py", date_str, "[1/2] 校验、TTS 与 ready manifest")
     if not ok1:
         print("\n[ERROR] TTS 生成失败，中止。")
         sys.exit(1)
@@ -129,13 +124,10 @@ def main(argv=None):
     if args.skip_email:
         print("\n[INFO] 已按要求跳过邮件推送。")
     else:
-        push_args = ["--strict"] if strict_email else []
-        ok2 = run_step(project, python_executable, "push_email.py", date_str, "[2/2] 发送邮件推送", push_args)
+        ok2 = run_step(project, python_executable, "deliver_ready.py", date_str, "[2/2] 复核 ready manifest 并发送")
         if not ok2:
-            message = "\n[ERROR] 邮件推送失败，但 MP3 已生成。" if strict_email else "\n[WARN] 邮件推送失败，但 MP3 已生成。"
-            print(message)
-            if strict_email:
-                sys.exit(1)
+            print("\n[ERROR] 确定性交付失败；未回退到旧内容。")
+            sys.exit(1)
         else:
             print("\n[OK] 全部完成！")
 
