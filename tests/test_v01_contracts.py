@@ -50,6 +50,11 @@ class ConfigContractTests(unittest.TestCase):
             config = load_dispatch_config(path, environ={"DISPATCH_ART_TARGET": "7"})
             self.assertEqual(config.art["targetItems"], 7)
 
+    def test_lock_has_exact_python39_and_modern_variants(self):
+        lock = (Path(__file__).resolve().parents[1] / "requirements.lock.txt").read_text(encoding="utf-8")
+        self.assertIn('aiohappyeyeballs==2.6.1; python_version < "3.10"', lock)
+        self.assertIn('aiohappyeyeballs==2.7.1; python_version >= "3.10"', lock)
+
 
 class HistoryContractTests(unittest.TestCase):
     def test_thirty_day_duplicate_and_seven_day_concentration(self):
