@@ -1,0 +1,104 @@
+name: Deliver Academic Dispatch
+
+on:
+  schedule:
+    # 23:00 UTC = 07:00 Asia/Shanghai on the following calendar day.
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYY-MM-DD in Asia/Shanghai; empty means today."
+        required: false
+        type: string
+      prepare_run_id:
+        description: "Optional successful prepare workflow run ID."
+        required: false
+        type: string
+      test_label:
+        description: "Mark the outgoing message as a test."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  DISPATCH_MODE: ci
+  PYTHONUTF8: "1"
+
+jobs:
+  deliver:
+    if: ${{ github.event_name != 'schedule' || vars.DISPATCH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: metadata
+        name: Resolve dispatch date and prepare run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_DATE: ${{ inputs.date || '' }}
+          REQUESTED_RUN_ID: ${{ inputs.prepare_run_id || '' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          DISPATCH_DATE="${REQUESTED_DATE:-$(TZ=Asia/Shanghai date +%F)}"
+          test "$(date -d "$DISPATCH_DATE" +%F 2>/dev/null)" = "$DISPATCH_DATE"
+          RUN_ID="$REQUESTED_RUN_ID"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID="$(gh run list \
+              --workflow prepare-dispatch.yml \
+              --branch "$DEFAULT_BRANCH" \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+          fi
+          echo "date=$DISPATCH_DATE" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "DISPATCH_DATE=$DISPATCH_DATE" >> "$GITHUB_ENV"
+
+      - name: Download same-date ready artifact
+        if: ${{ steps.metadata.outputs.run_id != '' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh run download "${{ steps.metadata.outputs.run_id }}"
+          --name "dispatch-ready-${{ steps.metadata.outputs.date }}"
+          --dir data
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install locked dependencies
+        run: python -m pip install -r requirements.lock.txt
+
+      - name: Revalidate manifest and deliver exactly once
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: >
+          python scripts/deliver_ready.py "$DISPATCH_DATE"
+          ${{ inputs.test_label == true && '--test-label' || '' }}
+
+      - name: Upload delivery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-delivery-${{ steps.metadata.outputs.date }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            data/${{ steps.metadata.outputs.date }}_sent.json
+            data/${{ steps.metadata.outputs.date }}_test_sent.json
+            data/runs.jsonl

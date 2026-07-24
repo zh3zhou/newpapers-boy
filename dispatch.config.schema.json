@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zh3zhou/newpapers-boy/blob/main/dispatch.config.schema.json",
+  "title": "Academic Dispatch configuration",
+  "type": "object",
+  "required": ["schemaVersion", "content", "schedule", "delivery", "tts", "history"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "content": {
+      "type": "object",
+      "required": ["academicFields", "academicSources", "art", "humor", "freshness", "language"],
+      "properties": {
+        "academicFields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "keywords", "items"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "keywords": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+              "items": {
+                "type": "object",
+                "required": ["min", "max"],
+                "properties": {
+                  "min": {"type": "integer", "minimum": 0},
+                  "max": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          }
+        },
+        "academicSources": {
+          "type": "object",
+          "required": ["preferred", "rollingWindowDays", "minimumDistinctDomains", "enforcement"]
+        },
+        "art": {
+          "type": "object",
+          "required": ["targetItems", "minimumDistinctSources", "maximumItemsPerSource", "preferences"],
+          "properties": {
+            "targetItems": {"type": "integer", "minimum": 1},
+            "minimumDistinctSources": {"type": "integer", "minimum": 1},
+            "maximumItemsPerSource": {"type": "integer", "minimum": 1},
+            "preferences": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "humor": {"type": "object"},
+        "freshness": {"type": "object"},
+        "language": {"type": "string"}
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["timezone", "prepareAt", "deliverAt", "readyMaxAgeMinutes"],
+      "properties": {
+        "timezone": {"const": "Asia/Shanghai"},
+        "prepareAt": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+        "deliverAt": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
+        "readyMaxAgeMinutes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "delivery": {"type": "object", "required": ["channel", "failurePolicy", "preventDuplicateSend"]},
+    "tts": {"type": "object", "required": ["voice", "rate"]},
+    "history": {"type": "object", "required": ["duplicateWindowDays", "diversityWindowDays"]}
+  }
+}

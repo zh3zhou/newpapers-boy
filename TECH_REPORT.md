@@ -1,287 +1,41 @@
-# TECH_REPORT.md — 技术架构文档
+# v0.1.0 技术报告：可审计的双阶段速递
 
-> 本文档供 AI Agent / 开发者快速理解项目结构、契约边界和扩展点。
+## 问题
 
-## 1. 架构总览
-
-```text
-config.md + AGENTS.md
-        ↓
-任意 agent runtime（由 AGENT_RUNNER_CMD 适配）
-        ↓
-data/YYYY-MM-DD_学术速递.md
-        ↓
-scripts/validate_dispatch.py
-        ↓
-GitHub generate artifact / 本地 data/
-        ↓
-run_daily.py --skip-email
-        ├─ scripts/tts_generate.py → data/YYYY-MM-DD_学术播报.mp3
-        └─ scripts/push_email.py --strict → SMTP 邮件
-        ↓
-GitHub Actions artifacts / 本地 data/
-```
+单次 Agent 任务同时检索、生成、TTS 和发信，会把不可预测的网页延迟带进 07:00 发送时刻，也缺少“发出的文件与验证过的文件完全相同”的证据。旧实现还依赖 Markdown 配置和手工 TSV 日志。
 
-调度适配分为两类：GitHub Actions 在云端调用非交互 provider，需要独立凭据；Codex 等桌面 runtime 若提供原生 automation，可复用用户已有登录在本机定时启动 agent。二者共享 `AGENTS.md/config.md` 和确定性后处理，但运行可用性与凭据边界不同，默认禁止同时启用以避免重复邮件。
+## 架构
 
-对于仓库未预置的 agent 产品，`RUNTIME_ADAPTERS.md` 定义运行时发现流程：以当前会话工具、本机 CLI 帮助、官方文档和官方仓库为证据，确认调度、授权、后台条件、权限、日志和费用。适配结论是运行时事实，不写死为跨产品假设。
+系统分为编辑平面与交付平面：
 
-核心原则：
+1. 编辑平面由可联网 Agent 读取 `AGENTS.md` 和 `dispatch.config.json`，进行广域网页搜索、筛选和写作。
+2. `finalize_dispatch.py` 运行严格结构检查、链接分类、历史去重和来源规则，生成 TTS，并为每个 artifact 计算 SHA-256。
+3. 原子写入的 `*_ready.json` 记录日期、UTC 时间、过期时间、路径、大小、哈希、内容统计、来源分布、验证摘要和运行 ID。
+4. `deliver_ready.py` 在发送前再次校验 manifest，检查 `*_sent.json`，成功后记录本地生成的 Message-ID。
+5. 门禁失败时只发送脱敏故障通知，任务仍失败，不回退旧内容。
 
-- Agent 做语义判断：搜索、筛选、摘要、编辑口吻、链接核验。
-- 脚本做确定性工作：环境读取、结构验证、TTS、邮件、退出码。
-- 调度器只做编排：GitHub Actions、本机计划任务或其他 agent 平台都可以。
+## 配置与兼容性
 
-## 2. Agent 运行器契约
+`dispatch.config.json` 使用 `schemaVersion=1`。JSON 是机器真源；`config.md` 只解释如何配置。旧领域表格保留一个版本的只读兼容，`migrate_config.py` 可生成新配置。
 
-`scripts/run_agent_command.py` 是平台适配层。它读取 `AGENT_RUNNER_CMD` 并从项目根目录执行。
+依赖采用 `requirements.in` 加精确 `requirements.lock.txt`。`pyproject.toml` 声明 Python 3.9+ 与 v0.1.0 元数据。Windows setup 会检测损坏的 `.venv`，将其重命名备份后重建。
 
-注入给 agent 命令的环境变量：
+## 内容与链接证据
 
-| 变量 | 说明 |
-| --- | --- |
-| `DISPATCH_DATE` | 目标日期，`YYYY-MM-DD` |
-| `DISPATCH_OUTPUT` | Markdown 输出路径 |
-| `DISPATCH_CONFIG` | 配置文件，默认 `config.md` |
-| `PROJECT_ROOT` | 仓库根目录 |
-| `DISPATCH_MODE` | `ci` 或 `local` |
+- 相同 URL 或标准化标题在 30 天内是硬错误。
+- 艺术默认 5 条，至少 3 个来源/域名，单源最多 2 条。
+- 学术来源采用 7 天滚动软目标，不为配额牺牲质量。
+- 链接 verdict 为 `reachable`、`bot_blocked`、`dead`、`unsafe` 或 `transient`。
+- DNS 解析后连接到已验证公网 IP，并再次阻止重定向到私网。
 
-agent 命令必须：
+## 调度与隔离
 
-- 读取 `AGENTS.md` 和 `config.md`。
-- 写出 UTF-8 Markdown 到 `DISPATCH_OUTPUT`。
-- 验证链接可达，不编造来源。
-- 成功退出 `0`，失败退出非零。
+桌面与 GitHub 都在 22:20 UTC 准备，在 23:00 UTC 交付，对应北京时间 06:20 与 07:00。GitHub prepare workflow 不获得 SMTP；deliver workflow 通过 GitHub CLI 选择默认分支成功的 prepare run，并由 manifest 再次约束日期和哈希。云端 schedule 默认关闭。
 
-`--mock` 会生成一份本地 mock Markdown，用于 GitHub Actions 手动烟测。
+## 可观测性
 
-可靠性与权限边界：
+`data/runs.jsonl` 记录运行阶段、状态、错误码、来源域名、哈希和 Message-ID；敏感值和邮件正文不进入日志。`project_doctor.py` 检查配置、锁文件、Python、最近 ready/sent 状态和 GitHub 发布面。
 
-- Agent 写入本次临时路径；脚本验证非空 UTF-8 后原子替换正式输出，旧文件不能冒充成功。
-- 默认超时 1800 秒，可用 `AGENT_TIMEOUT_SECONDS` 或 `--timeout` 调整。
-- 子进程只获得基础系统环境、契约变量、默认 provider key 和 `AGENT_ENV_ALLOWLIST` 指定项。
-- `SMTP_*`、`MAIL_TO` 不传给子进程；agent/provider 输出中的已知秘密值在日志写入前脱敏。
-- 本地命令仍能通过文件系统读取 `.env`，因此本地 runner 必须可信；GitHub generate job 中没有本地 `.env`。
+## 证据边界
 
-## 3. GitHub Actions 编排
-
-`.github/workflows/daily-dispatch.yml`：
-
-- `schedule`: UTC `0 23 * * *`，对应北京时间 07:00。
-- `workflow_dispatch`: 支持指定日期、mock 模式、是否发送邮件。
-- `DISPATCH_ENABLED=true` 只控制 schedule；手动 workflow 不受影响。
-- `generate` job 解析并验证日期，执行 agent/mock、严格结构与链接检查，上传 source evidence。
-- `deliver` job fresh checkout，下载并重新验证 source，生成 TTS，再按输入决定是否发送邮件。
-- SMTP Secrets 只注入邮件 step，不存在于 generate job 或 agent 子进程环境。
-- 两个 job 使用不同 artifact 名，失败时尽量保留已有证据。
-
-必需配置：
-
-- Repository variable 或 secret：`AGENT_RUNNER_CMD`
-- Repository variable：`DISPATCH_ENABLED`
-- Secrets：`SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`MAIL_TO`
-
-可选配置：
-
-- `TTS_VOICE`、`TTS_RATE`
-- `AGENT_ENV_ALLOWLIST`
-- agent provider API keys，如 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GOOGLE_API_KEY`、`HF_TOKEN`
-- 内置 OpenAI runner 可配置 `OPENAI_MODEL`，默认 `gpt-5.4-mini`
-
-### 3.1 GitHub 配置向导
-
-`scripts/setup_github_actions.ps1` 面向不熟 GitHub 的用户，负责把本地配置搬到 GitHub：
-
-- 从 `git remote get-url origin` 推导 `owner/repo`。
-- `-CheckOnly` 只做诊断，不写入 GitHub。
-- 检查 GitHub DNS/TCP 可达性。
-- 检查 GitHub CLI `gh` 是否安装、是否登录。
-- 检查 workflow 是否存在、是否被 Git 跟踪，以及当前是否有未提交改动。
-- 从 `.env` 读取 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASS`、`MAIL_TO`。
-- 将 SMTP 项写入 GitHub Actions Secrets。
-- 将 `TTS_VOICE`、`TTS_RATE`、`AGENT_RUNNER_CMD` 写入 GitHub Actions Variables。
-- 没有真实 runner 时写入 `DISPATCH_ENABLED=false`；只有 `-EnableSchedule` 才写入 `true`。
-- 可选触发一次 `daily-dispatch.yml` 的 mock workflow。
-- 非交互写入必须同时使用 `-NonInteractive -ConfirmWrite`，可用 `-SendEmailMock` 测试邮件。
-
-该脚本不会提交代码、不会 push、不会替用户创建真实 agent 命令。workflow 必须先提交并 push 到 GitHub，Actions 页面才会出现；如果用户暂不配置 GitHub，仍可按 `AGENTS.md` 让 agent 手动执行，或对已有 Markdown 运行 `run_daily.py`。
-
-### 3.2 真实定时配置向导
-
-`scripts/configure_real_schedule.py` 提供首个可直接工作的 provider adapter。它通过隐藏输入接收 OpenAI API Key，上传为 GitHub Secret，设置 `AGENT_RUNNER_CMD=python scripts/openai_dispatch_agent.py` 和 `OPENAI_MODEL`。启用采用两阶段提交：先在 `DISPATCH_ENABLED=false` 下触发 `mock=false, send_email=false` 的真实试跑；只有 workflow 成功且用户再次确认才打开 schedule。失败不会留下半启用状态。
-
-`scripts/openai_dispatch_agent.py` 使用 Responses API Web Search，读取仓库中的 `AGENTS.md/config.md` 并只写 `DISPATCH_OUTPUT`。其输出仍必须经过同一严格 validator，因此 provider adapter 不是可信边界。
-
-## 4. 配置体系
-
-| 文件/来源 | 用途 | 是否入库 |
-| --- | --- | --- |
-| `config.md` | 内容偏好：领域、关键词、条数、来源、路径、艺术方向 | 是 |
-| `AGENTS.md` | agent 执行契约：采集、输出、失败、CI 行为 | 是 |
-| `.env.example` | 本地/CI 环境变量模板 | 是 |
-| `.env` | 本地密钥：SMTP、TTS、agent 命令 | 否 |
-| GitHub secrets/vars | CI 密钥和运行配置 | 否 |
-
-`scripts/env_utils.py` 会先读 `.env`，再用进程环境覆盖。这保证本地文件方便调试，CI secrets 拥有更高优先级。
-
-`scripts/project_doctor.py` 提供三种脱敏 readiness：
-
-- `manual`：Python 3.9+ 真探针、依赖、配置和本地目录；可选要求邮箱。
-- `github-mock`：Git/gh、workflow 已发布、可选要求远端 SMTP Secret 名称。
-- `github-scheduled`：在 mock 条件上要求 SMTP、`DISPATCH_ENABLED=true` 和 runner Variable/Secret。
-
-输出支持人类文本和 `--json`。JSON 只包含状态、名称和下一步，不包含 `.env` 或 GitHub Secret 值。
-
-## 5. Markdown 契约
-
-生成端必须输出：
-
-```markdown
-# 会打岔的学术速递 — YYYY-MM-DD
-
-> 引言
-
-## 一、领域名称
-- **标题** — 来源
-  摘要：一句话摘要。
-  为什么值得看：一句话理由。
-  https://example.com/source
-
-## ✦ 今日打岔 ✦
-
-### 艺术一刻
-- **作品标题** — 来源
-  简介：一句话介绍。
-  https://example.com/art
-
-### 会心一笑
-- 趣味内容。
-```
-
-关键点：
-
-- 一级标题包含日期。
-- 每个 `config.md` 学术领域都要出现。
-- 学术条目以 `- **` 开头。
-- 学术条目必须包含摘要、为什么值得看、URL。
-- 打岔板块标题必须包含「打岔」。
-- 艺术和幽默分别用三级标题。
-
-## 6. Validator
-
-`scripts/validate_dispatch.py` 做确定性契约验证：
-
-- 日期格式和标题日期。
-- UTF-8、非空文件。
-- `config.md` 中配置的领域是否都存在。
-- 每个学术条目的摘要、理由、URL 是否存在。
-- 打岔、艺术、幽默结构是否存在。
-- TTS parser 是否能解析日期、学术区块、艺术和幽默。
-- 生成 JSON 报告到 `data/YYYY-MM-DD_validation.json`。
-- `--check-links` 对 URL 去重后执行 HEAD/GET 检查并记录每条结果。
-- 404/410 等明确永久错误失败；403、429、5xx、超时和临时 DNS 故障记为 warning。
-- 请求前及重定向时拒绝 localhost、私网、link-local、保留地址和 URL 内嵌凭据，降低 SSRF 风险。
-
-注意：配置中的 `3-5` 是偏好，不是硬性失败条件。低于配置数量会记录 warning，因为项目允许「宁缺毋滥」和「今日暂无亮点」。
-
-## 7. TTS 模块
-
-`scripts/tts_generate.py`：
-
-- 从 Markdown 二级标题动态解析学术领域，不硬编码字段名。
-- 用状态机识别打岔、艺术、幽默。
-- `edge_tts` 懒加载，便于测试 parser 时不安装 TTS 依赖。
-- 输出：
-  - `data/YYYY-MM-DD_学术播报.mp3`
-  - `data/YYYY-MM-DD_播报稿.txt`
-
-可修改点：
-
-- 语音：`.env` / CI vars 中的 `TTS_VOICE`
-- 语速：`TTS_RATE`
-- 播报文案：`build_broadcast_text()`
-- 截断长度：`smart_truncate()` 调用参数
-
-## 8. 邮件模块
-
-`scripts/push_email.py`：
-
-- SMTP SSL 465 或 STARTTLS。
-- Markdown 轻量转 HTML。
-- MP3 作为附件发送。
-- 默认本地模式：邮件未配置或失败时返回 `0`，方便只生成音频。
-- strict/CI 模式：`--strict` 或 `DISPATCH_MODE=ci` 时，邮件失败返回非零。
-
-## 9. 后处理入口
-
-`run_daily.py`：
-
-- 检查 `data/YYYY-MM-DD_学术速递.md` 是否存在。
-- 调用 `tts_generate.py`。
-- 调用 `push_email.py`。
-- 支持：
-  - `--skip-email`
-  - `--strict-email`
-
-它会优先使用可用的 `.venv\Scripts\python.exe`。如果本地虚拟环境已损坏，会回退到当前 Python 并打印 warning。GitHub Actions 不依赖本地 `.venv`。
-
-## 10. 测试
-
-使用标准库 `unittest`：
-
-```bash
-python -m unittest discover -s tests
-```
-
-覆盖点：
-
-- Markdown parser 支持可配置领域和打岔板块。
-- 环境变量覆盖 `.env`。
-- validator 接受有效 Markdown。
-- validator 拒绝缺失输出、缺失配置字段、缺失 URL。
-- doctor 三种 target、Secret 脱敏和 manual 不触发 GitHub 探针。
-- fake agent 成功、失败、缺输出、旧输出、空文件、非 UTF-8、日志脱敏和 SMTP 环境隔离。
-- 链接永久失败、限流/临时失败和私网地址分类。
-
-手动验证：
-
-```bash
-python scripts/run_agent_command.py 2026-07-04 --mock
-python scripts/validate_dispatch.py 2026-07-04 --strict --check-links
-python run_daily.py 2026-07-04 --skip-email
-```
-
-## 11. 扩展点
-
-### 接入新 Agent
-
-不要改核心脚本；配置 `AGENT_RUNNER_CMD` 即可。若某 agent 需要复杂适配，新增一个脚本，例如：
-
-```text
-scripts/my_agent_adapter.py
-```
-
-然后设置：
-
-```text
-AGENT_RUNNER_CMD=python scripts/my_agent_adapter.py
-```
-
-适配脚本只需遵守 `DISPATCH_*` 环境变量和输出契约。
-
-### 添加推送通道
-
-在 `scripts/push_email.py` 中添加 `push_xxx(...) -> bool`，并在 `main()` 中按需调用。保持 strict 模式的退出码语义。
-
-### 添加 TTS 引擎
-
-新增 `scripts/tts_xxx.py`，保持 CLI 接口 `python scripts/tts_xxx.py YYYY-MM-DD`，或在 `tts_generate.py` 内抽象 `synthesize()`。
-
-## 12. 风险边界
-
-- 不提交 `.env`、`data/`、`archive/`。
-- 不把每日输出提交回仓库；GitHub Actions 使用 artifacts。
-- 不在文档中写入真实 API key 或邮箱授权码。
-- `--check-links` 会访问生成内容中的公开 URL；私网和本机地址被拒绝，临时外部故障只记 warning。
-- GitHub generate job 不持有 SMTP Secrets；deliver 在 fresh checkout 后才取得邮件配置。
-- 没有真实 runner 时 `DISPATCH_ENABLED=false`，避免每天制造预期失败。
+单元和契约测试覆盖配置、链接、历史、artifact 完整性、重复发送门禁、邮件与 workflow 隔离。一次真实测试邮件证明当前 SMTP 路径可用；它不等于长期 07:00 SLA。长期准点只能由连续生产运行的结构化日志和发送收据证实。

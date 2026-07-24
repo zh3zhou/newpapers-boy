@@ -15,6 +15,8 @@ push_email.py — 将当日速递（Markdown 正文 + MP3 附件）通过 SMTP �
 依赖：Python 标准库（smtplib, email），无需额外 pip 安装。
 """
 
+from __future__ import annotations
+
 import sys
 sys.dont_write_bytecode = True
 
@@ -23,21 +25,20 @@ import html
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import urllib.request
 import urllib.error
 
-from env_utils import load_env
+try:
+    from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from .env_utils import load_env
+except ImportError:  # Direct script execution: python scripts/push_email.py
+    from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from env_utils import load_env
 
 WORK_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = WORK_DIR / "data"
-
-
-def ensure_data_dir():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============ Markdown → HTML 轻量转换 ============
@@ -127,11 +128,20 @@ def _inline_md(text: str) -> str:
 
 # ============ 邮件发送 ============
 
-def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path: Path) -> bool:
+def push_email(
+    env: dict,
+    title: str,
+    body_summary: str,
+    md_path: Path,
+    mp3_path: Path,
+    *,
+    result: dict | None = None,
+) -> bool:
     import smtplib
     from email.mime.application import MIMEApplication
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
+    from email.utils import make_msgid
     import html as html_mod
 
     host = env.get("SMTP_HOST")
@@ -154,6 +164,8 @@ def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path
         msg["From"] = user
         msg["To"] = to_addr
         msg["Subject"] = title
+        message_id = make_msgid(domain="academic-dispatch.local")
+        msg["Message-ID"] = message_id
 
         body_html = f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:700px;margin:0 auto;padding:20px;">
@@ -186,10 +198,66 @@ def push_email(env: dict, title: str, body_summary: str, md_path: Path, mp3_path
         server.login(user, password)
         server.sendmail(user, [to_addr], msg.as_string())
         server.quit()
-        print(f"[邮件] 成功发送至 {to_addr}")
+        print("[邮件] 发送成功（收件人已隐藏）")
+        if result is not None:
+            result.update({"status": "sent", "messageId": message_id})
         return True
     except Exception as e:
         print(f"[邮件] 异常: {e}")
+        if result is not None:
+            result.update({"status": "failed", "errorType": type(e).__name__})
+        return False
+
+
+def push_failure_email(env: dict, date_str: str, error_code: str, detail: str, *, result: dict | None = None) -> bool:
+    import html
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.utils import make_msgid
+
+    host = env.get("SMTP_HOST")
+    user = env.get("SMTP_USER")
+    password = env.get("SMTP_PASS")
+    to_addr = env.get("MAIL_TO")
+    try:
+        port = int(env.get("SMTP_PORT") or "465")
+    except ValueError:
+        return False
+    if not all([host, user, password, to_addr]):
+        return False
+    safe_code = re.sub(r"[^A-Za-z0-9_.-]", "_", error_code)[:80]
+    safe_detail = re.sub(r"[A-Za-z]:\\[^\s]+|/[^\s]+", "[local evidence]", detail)[:300]
+    message_id = make_msgid(domain="academic-dispatch.local")
+    msg = MIMEMultipart("alternative")
+    msg["From"] = user
+    msg["To"] = to_addr
+    msg["Subject"] = f"⚠️ 学术速递未发送 — {date_str}"
+    msg["Message-ID"] = message_id
+    text = f"{date_str} 的学术速递未通过交付门。\n错误代码：{safe_code}\n摘要：{safe_detail}\n未发送旧内容或附件。"
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+    msg.attach(
+        MIMEText(
+            f"<h2>学术速递未发送</h2><p>{html.escape(date_str)} 的工件未通过交付门。</p>"
+            f"<p>错误代码：<code>{html.escape(safe_code)}</code></p>"
+            f"<p>{html.escape(safe_detail)}</p><p>未发送旧内容或附件。</p>",
+            "html",
+            "utf-8",
+        )
+    )
+    try:
+        server = smtplib.SMTP_SSL(host, port, timeout=30) if port == 465 else smtplib.SMTP(host, port, timeout=30)
+        if port != 465:
+            server.starttls()
+        server.login(user, password)
+        server.sendmail(user, [to_addr], msg.as_string())
+        server.quit()
+        if result is not None:
+            result.update({"status": "failure_notified", "messageId": message_id})
+        return True
+    except Exception as exc:
+        if result is not None:
+            result.update({"status": "notification_failed", "errorType": type(exc).__name__})
         return False
 
 
@@ -280,17 +348,24 @@ def build_summary(md_path: Path) -> tuple:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="发送学术速递邮件。")
     parser.add_argument("date", nargs="?", help="日期，格式 YYYY-MM-DD。")
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
+    parser.add_argument("--markdown", type=Path, help="输入 Markdown；相对路径基于项目根目录。")
+    parser.add_argument("--mp3", type=Path, help="MP3 附件；相对路径基于项目根目录。")
     parser.add_argument("--strict", action="store_true", help="失败时返回非零退出码，供 CI 使用。")
     args = parser.parse_args(argv)
 
-    ensure_data_dir()
-    env = load_env(WORK_DIR)
+    project = ProjectPaths.from_root(args.root)
+    project.data.mkdir(parents=True, exist_ok=True)
+    env = load_env(project.root)
     strict = args.strict or env.get("DISPATCH_MODE") == "ci"
 
-    date_str = args.date or datetime.now().strftime("%Y-%m-%d")
-
-    md_path = DATA_DIR / f"{date_str}_学术速递.md"
-    mp3_path = DATA_DIR / f"{date_str}_学术播报.mp3"
+    try:
+        date_str = resolve_dispatch_date(args.date)
+    except ValueError as exc:
+        parser.error(str(exc))
+    artifacts = project.artifacts(date_str)
+    md_path = resolve_from_root(args.markdown, project.root, artifacts.markdown)
+    mp3_path = resolve_from_root(args.mp3, project.root, artifacts.audio)
 
     title, summary = build_summary(md_path)
     push_title = f"📰 {title}"
@@ -322,7 +397,7 @@ def main(argv=None):
             return 1
         print("[INFO] 邮件推送未配置或失败。")
         print("[INFO] 如需邮件推送，请在 .env 文件或 CI secrets 中填写 SMTP_HOST / SMTP_USER / SMTP_PASS / MAIL_TO。")
-        print(f"[INFO] 本地配置文件位置：{WORK_DIR / '.env'}")
+        print(f"[INFO] 本地配置文件位置：{project.env_file}")
         return 0
 
     print()

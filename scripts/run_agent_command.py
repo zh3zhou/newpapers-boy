@@ -8,14 +8,21 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import datetime
+import time
 from pathlib import Path
 
-from env_utils import load_env
-from validate_dispatch import parse_config_fields
+try:
+    from .dispatch_config import parse_config_fields
+    from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from .env_utils import load_env
+    from .run_events import append_event
+except ImportError:  # Direct script execution: python scripts/run_agent_command.py
+    from dispatch_config import parse_config_fields
+    from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from env_utils import load_env
+    from run_events import append_event
 
 WORK_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = WORK_DIR / "data"
 
 DEFAULT_AGENT_ENV_ALLOWLIST = {
     "OPENAI_API_KEY",
@@ -56,8 +63,8 @@ SAFE_SYSTEM_ENV = {
 FORBIDDEN_AGENT_ENV = {"MAIL_TO"}
 
 
-def build_mock_markdown(date_str: str) -> str:
-    fields = parse_config_fields(WORK_DIR / "config.md")
+def build_mock_markdown(date_str: str, config_path: Path | None = None) -> str:
+    fields = parse_config_fields(config_path or WORK_DIR / "dispatch.config.json")
     if not fields:
         fields = []
 
@@ -103,9 +110,7 @@ def build_mock_markdown(date_str: str) -> str:
 
 
 def resolve_date(value: str | None) -> str:
-    if value:
-        return value
-    return datetime.now().strftime("%Y-%m-%d")
+    return resolve_dispatch_date(value)
 
 
 def parse_agent_env_allowlist(env: dict[str, str]) -> set[str]:
@@ -145,37 +150,57 @@ def redact_output(text: str, env: dict[str, str]) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="执行 agent 生成命令。")
     parser.add_argument("date", nargs="?", help="日期，格式 YYYY-MM-DD。")
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
+    parser.add_argument("--config", type=Path, help="配置文件；相对路径基于项目根目录。")
     parser.add_argument("--output", type=Path, help="Markdown 输出路径。")
     parser.add_argument("--log", type=Path, help="agent 日志路径。")
     parser.add_argument("--timeout", type=int, help="agent 命令最长运行秒数，默认 1800。")
     parser.add_argument("--mock", action="store_true", help="生成 mock Markdown，用于 CI 手动烟测。")
     args = parser.parse_args(argv)
 
-    env = load_env(WORK_DIR)
-    date_str = resolve_date(args.date or env.get("DISPATCH_DATE"))
-    output_path = args.output or Path(env.get("DISPATCH_OUTPUT", DATA_DIR / f"{date_str}_学术速递.md"))
-    if not output_path.is_absolute():
-        output_path = WORK_DIR / output_path
-    log_path = args.log or DATA_DIR / f"{date_str}_agent.log"
-    if not log_path.is_absolute():
-        log_path = WORK_DIR / log_path
+    project = ProjectPaths.from_root(args.root)
+    if not project.root.is_dir():
+        print(f"[ERROR] project root does not exist: {project.root}")
+        return 2
+    env = load_env(project.root)
+    try:
+        date_str = resolve_date(args.date or env.get("DISPATCH_DATE"))
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return 2
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    artifacts = project.artifacts(date_str)
+    event_log = project.data / "runs.jsonl"
+    started = time.monotonic()
+    append_event(event_log, date_str, "generation_started", "running")
+    configured_output = args.output or (Path(env["DISPATCH_OUTPUT"]) if env.get("DISPATCH_OUTPUT") else None)
+    output_path = resolve_from_root(configured_output, project.root, artifacts.markdown)
+    log_path = resolve_from_root(args.log, project.root, artifacts.agent_log)
+    config_setting = args.config or Path(env.get("DISPATCH_CONFIG", "dispatch.config.json"))
+    config_path = resolve_from_root(config_setting, project.root, project.config)
+    config_contract = str(config_setting)
+
+    project.data.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     mock = args.mock or env.get("AGENT_RUNNER_MOCK", "").lower() in {"1", "true", "yes"}
     if mock:
-        output_path.write_text(build_mock_markdown(date_str), encoding="utf-8")
+        output_path.write_text(build_mock_markdown(date_str, config_path), encoding="utf-8")
         log_path.write_text(f"mock agent runner wrote {output_path}\n", encoding="utf-8")
+        append_event(
+            event_log, date_str, "generated", "ok", mock=True,
+            durationMs=round((time.monotonic() - started) * 1000),
+        )
         print(f"[OK] mock agent runner wrote Markdown: {output_path}")
         return 0
 
     command = env.get("AGENT_RUNNER_CMD", "").strip()
     if not command:
+        append_event(event_log, date_str, "generated", "failed", errorCode="missing_agent_runner")
         print("[ERROR] AGENT_RUNNER_CMD is not set.")
         print("[ERROR] Configure it as a GitHub Actions repository variable/secret, or run with --mock for smoke tests.")
-        print("[INFO] Without a runner, open this project in any capable agent and ask it to read AGENTS.md and config.md.")
+        print("[INFO] Without a runner, open this project in any capable agent and ask it to read AGENTS.md and dispatch.config.json.")
         return 2
 
     try:
@@ -192,8 +217,8 @@ def main(argv=None) -> int:
         {
             "DISPATCH_DATE": date_str,
             "DISPATCH_OUTPUT": str(temporary_output),
-            "DISPATCH_CONFIG": env.get("DISPATCH_CONFIG", "config.md"),
-            "PROJECT_ROOT": str(WORK_DIR),
+            "DISPATCH_CONFIG": config_contract,
+            "PROJECT_ROOT": str(project.root),
             "DISPATCH_MODE": env.get("DISPATCH_MODE", "local"),
         }
     )
@@ -202,7 +227,7 @@ def main(argv=None) -> int:
     try:
         result = subprocess.run(
             command,
-            cwd=str(WORK_DIR),
+            cwd=str(project.root),
             env=child_env,
             shell=True,
             text=True,
@@ -230,6 +255,10 @@ def main(argv=None) -> int:
         print(safe_output)
 
     if result.returncode != 0:
+        append_event(
+            event_log, date_str, "generated", "failed", errorCode="agent_nonzero",
+            durationMs=round((time.monotonic() - started) * 1000),
+        )
         temporary_output.unlink(missing_ok=True)
         print(f"[ERROR] agent command failed with exit code {result.returncode}")
         return result.returncode
@@ -251,6 +280,10 @@ def main(argv=None) -> int:
         return 5
 
     temporary_output.replace(output_path)
+    append_event(
+        event_log, date_str, "generated", "ok",
+        durationMs=round((time.monotonic() - started) * 1000),
+    )
 
     print(f"[OK] agent output ready: {output_path}")
     print(f"[INFO] agent log: {log_path}")

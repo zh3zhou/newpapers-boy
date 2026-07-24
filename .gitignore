@@ -1,6 +1,7 @@
 # ========== 环境与密钥 ==========
 .env
 .venv/
+.venv.broken-*/
 __pycache__/
 *.pyc
 .first_run_done

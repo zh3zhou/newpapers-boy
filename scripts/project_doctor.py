@@ -11,15 +11,23 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from env_utils import parse_env_file
-from validate_dispatch import parse_config_fields
+try:
+    from .dispatch_config import parse_config_fields
+    from .env_utils import parse_env_file
+except ImportError:  # Direct script execution: python scripts/project_doctor.py
+    from dispatch_config import parse_config_fields
+    from env_utils import parse_env_file
 
 WORK_DIR = Path(__file__).resolve().parent.parent
 TARGETS = ("manual", "github-mock", "github-scheduled")
 SMTP_NAMES = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_TO")
-WORKFLOW_PATH = ".github/workflows/daily-dispatch.yml"
+WORKFLOW_PATHS = (
+    ".github/workflows/prepare-dispatch.yml",
+    ".github/workflows/deliver-dispatch.yml",
+)
 
 
 def run_command(command: list[str], cwd: Path, timeout: int = 15) -> tuple[int, str]:
@@ -154,17 +162,17 @@ def inspect_github(root: Path) -> tuple[list[dict], dict]:
     else:
         checks.append(check("git_remote", "block", "没有识别到 GitHub origin。"))
 
-    workflow = root / WORKFLOW_PATH
+    workflows_local = [path for path in WORKFLOW_PATHS if (root / path).is_file()]
     checks.append(
-        check("workflow_local", "ok", f"本地存在 {WORKFLOW_PATH}。")
-        if workflow.is_file()
-        else check("workflow_local", "block", f"缺少 {WORKFLOW_PATH}。")
+        check("workflow_local", "ok", "本地存在 prepare/deliver workflows。")
+        if len(workflows_local) == len(WORKFLOW_PATHS)
+        else check("workflow_local", "block", "缺少 workflow: " + ", ".join(set(WORKFLOW_PATHS) - set(workflows_local)))
     )
-    tracked_code, _ = run_command(["git", "ls-files", "--error-unmatch", WORKFLOW_PATH], root)
+    tracked = all(run_command(["git", "ls-files", "--error-unmatch", path], root)[0] == 0 for path in WORKFLOW_PATHS)
     checks.append(
-        check("workflow_tracked", "ok", "workflow 已被 Git 跟踪。")
-        if tracked_code == 0
-        else check("workflow_tracked", "block", "workflow 尚未提交，GitHub 还看不到它。")
+        check("workflow_tracked", "ok", "两个 workflow 均已被 Git 跟踪。")
+        if tracked
+        else check("workflow_tracked", "block", "prepare/deliver workflow 尚未全部提交。")
     )
 
     gh = find_gh()
@@ -195,7 +203,8 @@ def inspect_github(root: Path) -> tuple[list[dict], dict]:
         [gh, "workflow", "list", "--repo", canonical_repo, "--json", "path,state"], root
     )
     if workflows_code == 0 and isinstance(workflows, list):
-        state["workflow_published"] = any(item.get("path") == WORKFLOW_PATH for item in workflows)
+        published = {item.get("path") for item in workflows}
+        state["workflow_published"] = all(path in published for path in WORKFLOW_PATHS)
     checks.append(
         check("workflow_published", "ok", "workflow 已发布到 GitHub 默认分支。")
         if state["workflow_published"]
@@ -274,11 +283,11 @@ def build_report(root: Path, target: str, require_email: bool = False) -> dict:
     env = parse_env_file(root / ".env")
     checks = []
 
-    fields = parse_config_fields(root / "config.md")
+    fields = parse_config_fields(root / "dispatch.config.json")
     checks.append(
-        check("config", "ok", f"config.md 包含 {len(fields)} 个学术领域。")
+        check("config", "ok", f"dispatch.config.json 包含 {len(fields)} 个学术领域。")
         if fields
-        else check("config", "block", "config.md 没有可解析的学术领域。")
+        else check("config", "block", "dispatch.config.json 无效或没有学术领域。")
     )
 
     github_state = {"repo": None, "secret_names": set(), "variables": {}, "workflow_published": False}
@@ -310,6 +319,32 @@ def build_report(root: Path, target: str, require_email: bool = False) -> dict:
             check("agent_runner_local", "ok", "本地 AGENT_RUNNER_CMD 已配置（值已隐藏）。")
             if env.get("AGENT_RUNNER_CMD")
             else check("agent_runner_local", "warn", "未配置本地 runner；仍可让当前交互式 agent 直接运行。")
+        )
+        lock = root / "requirements.lock.txt"
+        checks.append(
+            check("dependency_lock", "ok", "精确依赖锁存在。")
+            if lock.is_file() and "==" in lock.read_text(encoding="utf-8")
+            else check("dependency_lock", "block", "requirements.lock.txt 缺失或不是精确锁。")
+        )
+        ready_files = sorted((root / "data").glob("*_ready.json"), reverse=True)
+        sent_files = sorted(
+            (path for path in (root / "data").glob("*_sent.json") if not path.name.endswith("_test_sent.json")),
+            reverse=True,
+        )
+        if ready_files:
+            try:
+                ready = json.loads(ready_files[0].read_text(encoding="utf-8"))
+                expires = datetime.fromisoformat(str(ready["expiresAt"]).replace("Z", "+00:00"))
+                status = "ok" if expires >= datetime.now(timezone.utc) else "warn"
+                checks.append(check("latest_ready", status, f"最近 ready manifest: {ready_files[0].name}。"))
+            except (OSError, KeyError, ValueError, json.JSONDecodeError):
+                checks.append(check("latest_ready", "warn", "最近 ready manifest 无法解析。"))
+        else:
+            checks.append(check("latest_ready", "info", "尚无 ready manifest。"))
+        checks.append(
+            check("latest_delivery", "ok", f"最近发送收据: {sent_files[0].name}。")
+            if sent_files
+            else check("latest_delivery", "info", "尚无发送收据；长期准点需由生产日志验证。")
         )
     else:
         github_checks, github_state = inspect_github(root)
@@ -343,7 +378,7 @@ def main(argv=None) -> int:
     parser.add_argument("--target", choices=TARGETS, default="manual")
     parser.add_argument("--json", action="store_true", help="输出不含秘密值的 JSON。")
     parser.add_argument("--require-email", action="store_true", help="把邮件配置作为就绪条件。")
-    parser.add_argument("--root", type=Path, default=WORK_DIR, help=argparse.SUPPRESS)
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
     args = parser.parse_args(argv)
 
     report = build_report(args.root.resolve(), args.target, args.require_email)

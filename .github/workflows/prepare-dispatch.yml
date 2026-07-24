@@ -1,0 +1,92 @@
+name: Prepare Academic Dispatch
+
+on:
+  schedule:
+    # 22:20 UTC = 06:20 Asia/Shanghai on the following calendar day.
+    - cron: "20 22 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYY-MM-DD in Asia/Shanghai; empty means today."
+        required: false
+        type: string
+      mock:
+        description: "Use the built-in smoke-test generator."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DISPATCH_MODE: ci
+  DISPATCH_CONFIG: dispatch.config.json
+  PYTHONUTF8: "1"
+
+jobs:
+  prepare:
+    if: ${{ github.event_name != 'schedule' || vars.DISPATCH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: metadata
+        name: Resolve dispatch date
+        shell: bash
+        env:
+          REQUESTED_DATE: ${{ inputs.date || '' }}
+        run: |
+          set -euo pipefail
+          DISPATCH_DATE="${REQUESTED_DATE:-$(TZ=Asia/Shanghai date +%F)}"
+          test "$(date -d "$DISPATCH_DATE" +%F 2>/dev/null)" = "$DISPATCH_DATE"
+          echo "date=$DISPATCH_DATE" >> "$GITHUB_OUTPUT"
+          echo "DISPATCH_DATE=$DISPATCH_DATE" >> "$GITHUB_ENV"
+          echo "DISPATCH_OUTPUT=data/${DISPATCH_DATE}_学术速递.md" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install locked dependencies
+        run: python -m pip install -r requirements.lock.txt
+
+      - name: Generate mock Markdown
+        if: ${{ inputs.mock == true }}
+        run: python scripts/run_agent_command.py "$DISPATCH_DATE" --mock
+
+      - name: Run configured web-search agent
+        if: ${{ inputs.mock != true }}
+        env:
+          AGENT_RUNNER_CMD: ${{ vars.AGENT_RUNNER_CMD || secrets.AGENT_RUNNER_CMD }}
+          AGENT_ENV_ALLOWLIST: ${{ vars.AGENT_ENV_ALLOWLIST }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.4-mini' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/run_agent_command.py "$DISPATCH_DATE"
+
+      - name: Validate, synthesize, and seal
+        env:
+          TTS_VOICE: ${{ vars.TTS_VOICE || 'zh-CN-XiaoxiaoNeural' }}
+          TTS_RATE: ${{ vars.TTS_RATE || '+0%' }}
+        run: python scripts/finalize_dispatch.py "$DISPATCH_DATE"
+
+      - name: Upload date-scoped ready artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dispatch-ready-${{ steps.metadata.outputs.date }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            data/${{ steps.metadata.outputs.date }}_学术速递.md
+            data/${{ steps.metadata.outputs.date }}_学术播报.mp3
+            data/${{ steps.metadata.outputs.date }}_播报稿.txt
+            data/${{ steps.metadata.outputs.date }}_validation.json
+            data/${{ steps.metadata.outputs.date }}_ready.json
+            data/${{ steps.metadata.outputs.date }}_agent.log
+            data/runs.jsonl

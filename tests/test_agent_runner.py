@@ -58,7 +58,7 @@ class AgentRunnerIntegrationTests(unittest.TestCase):
         self.assertFalse(captured["mail_present"])
         self.assertTrue(captured["provider_present"])
         self.assertEqual(captured["date"], "2026-07-12")
-        self.assertEqual(captured["config"], "config.md")
+        self.assertEqual(captured["config"], "dispatch.config.json")
         self.assertEqual(captured["mode"], "local")
         self.assertEqual(Path(captured["project_root"]), ROOT)
         self.assertEqual(Path(captured["cwd"]), ROOT)

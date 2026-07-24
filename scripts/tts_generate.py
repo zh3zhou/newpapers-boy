@@ -17,37 +17,26 @@ tts_generate.py — 将当日「会打岔的学术速递」Markdown 转为新闻
     - 任意领域配置均可正确播报，无需修改代码。
 """
 
-import sys
-sys.dont_write_bytecode = True
-
+import argparse
 import asyncio
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
-from env_utils import load_env
+try:
+    from .dispatch_config import load_dispatch_config
+    from .dispatch_markdown import clean_text, parse_markdown
+    from .dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from .env_utils import load_env
+except ImportError:  # Direct script execution: python scripts/tts_generate.py
+    from dispatch_config import load_dispatch_config
+    from dispatch_markdown import clean_text, parse_markdown
+    from dispatch_paths import ProjectPaths, resolve_dispatch_date, resolve_from_root
+    from env_utils import load_env
 
 WORK_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = WORK_DIR / "data"
 DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 DEFAULT_RATE = "+0%"
-
-DIVERSION_KEYWORDS = ("打岔", "休闲", "轻松一刻", "diversion")
-ART_KEYWORDS = ("艺术", "摄影", "art")
-HUMOR_KEYWORDS = ("笑", "幽默", "趣味", "冷知识", "趣闻", "段子", "humor")
-
-
-def ensure_data_dir():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def clean_text(s: str) -> str:
-    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
-    s = re.sub(r"[*_`#>]+", "", s)
-    s = re.sub(r"https?://\S+", "", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
 
 
 def smart_truncate(text: str, max_len: int) -> str:
@@ -77,163 +66,6 @@ def smart_truncate(text: str, max_len: int) -> str:
         if pos >= max_len * 0.5:
             return segment[:pos] + "。"
     return segment[: max_len - 1] + "。"
-
-
-def _is_diversion_heading(title: str) -> bool:
-    return any(kw in title for kw in DIVERSION_KEYWORDS)
-
-
-def _is_art_heading(title: str) -> bool:
-    return any(kw in title for kw in ART_KEYWORDS)
-
-
-def _is_humor_heading(title: str) -> bool:
-    return any(kw in title for kw in HUMOR_KEYWORDS)
-
-
-def _collect_sub_items(lines, start_idx):
-    j = start_idx + 1
-    sub_lines = []
-    while j < len(lines):
-        nxt = lines[j]
-        if nxt.startswith("  ") or nxt.startswith("\t"):
-            sub_lines.append(nxt.strip())
-            j += 1
-        elif nxt.strip() == "":
-            j += 1
-        else:
-            break
-    return sub_lines, j
-
-
-def parse_markdown(md_text: str) -> dict:
-    """
-    泛化 Markdown 解析：
-      - 任意 ## 二级标题 视为一个学术板块（除非命中打岔关键词）
-      - ## 含"打岔"等关键词时进入 diversion 模式
-        - 其下 ### 命中"艺术"等 → 艺术板块
-        - 其下 ### 命中"笑/幽默/趣味"等 → 趣味板块
-      - 学术条目：以 "- **" 或 "* **" 开头的列表项，紧随缩进行为"摘要/为什么值得看"
-    """
-    result = {
-        "date": None,
-        "intro": "",
-        "sections": [],
-        "arts": [],
-        "humors": [],
-    }
-
-    date_match = re.search(r"#\s*.+?[—\-\s·]*(\d{4}-\d{2}-\d{2})", md_text)
-    if date_match:
-        result["date"] = date_match.group(1)
-
-    lines = md_text.splitlines()
-    in_diversion = False
-    current_section_title = None
-    current_items = []
-    mode = None
-
-    def flush_section():
-        nonlocal current_section_title, current_items
-        if current_section_title is not None and mode == "academic":
-            result["sections"].append({"title": current_section_title, "items": current_items})
-        current_section_title = None
-        current_items = []
-
-    i = 0
-    while i < len(lines):
-        line = lines[i].rstrip()
-        stripped = line.strip()
-
-        if not stripped or stripped.startswith("---"):
-            i += 1
-            continue
-
-        if stripped.startswith("# "):
-            i += 1
-            continue
-
-        if stripped.startswith(">") and mode is None and not in_diversion:
-            result["intro"] = stripped.lstrip(">").strip()
-            i += 1
-            continue
-
-        m2 = re.match(r"^##\s+(?:[一二三四五六七八九十]+、)?\s*(.+)", stripped)
-        if m2:
-            flush_section()
-            heading = m2.group(1).strip()
-            if _is_diversion_heading(heading):
-                in_diversion = True
-                mode = None
-            else:
-                in_diversion = False
-                mode = "academic"
-                current_section_title = heading
-                current_items = []
-            i += 1
-            continue
-
-        m3 = re.match(r"^###\s+(.+)", stripped)
-        if m3 and in_diversion:
-            flush_section()
-            sub = m3.group(1).strip()
-            if _is_art_heading(sub):
-                mode = "art"
-            elif _is_humor_heading(sub):
-                mode = "humor"
-            else:
-                mode = None
-            i += 1
-            continue
-
-        if mode == "academic" and re.match(r"^[-*]\s+\*\*", stripped):
-            sub_lines, j = _collect_sub_items(lines, i)
-            summary = ""
-            why = ""
-            for sl in sub_lines:
-                sl_clean = clean_text(sl)
-                if sl_clean.startswith("摘要"):
-                    summary = re.sub(r"^摘要[：:]\s*", "", sl_clean)
-                elif sl_clean.startswith("为什么值得看"):
-                    why = re.sub(r"^为什么值得看[：:]\s*", "", sl_clean)
-            current_items.append({"summary": summary, "why": why})
-            i = j
-            continue
-
-        if mode == "art" and re.match(r"^[-*]\s+\*\*", stripped):
-            title_m = re.match(r"^[-*]\s+\*\*(.+?)\*\*", stripped)
-            art_title = clean_text(title_m.group(1)) if title_m else ""
-            art_title = re.sub(r"\s*[—–-]+\s*.+$", "", art_title).strip()
-            sub_lines, j = _collect_sub_items(lines, i)
-            intro = ""
-            for sl in sub_lines:
-                sl_clean = clean_text(sl)
-                if sl_clean.startswith("简介"):
-                    intro = re.sub(r"^简介[：:]\s*", "", sl_clean)
-                elif not sl_clean.startswith("链接") and not sl_clean.startswith("http"):
-                    if intro:
-                        intro += " " + sl_clean
-                    else:
-                        intro = sl_clean
-            result["arts"].append({"title": art_title, "intro": intro})
-            i = j
-            continue
-
-        if mode == "humor" and re.match(r"^[-*]\s+", stripped):
-            text = re.sub(r"^[-*]\s+", "", stripped)
-            sub_lines, j = _collect_sub_items(lines, i)
-            for sl in sub_lines:
-                text += " " + sl.strip()
-            text = clean_text(text)
-            text = re.sub(r"^(冷知识一则|段子|笑话|趣事|趣闻)[：:]\s*", "", text)
-            result["humors"].append(text)
-            i = j
-            continue
-
-        i += 1
-
-    flush_section()
-    return result
 
 
 def _section_intro(idx: int, total: int, title: str) -> str:
@@ -314,23 +146,39 @@ async def synthesize(text: str, output_path: Path, voice: str, rate: str):
     await communicate.save(str(output_path))
 
 
-def main():
-    ensure_data_dir()
-    env = load_env(WORK_DIR)
-    voice = env.get("TTS_VOICE", DEFAULT_VOICE)
-    rate = env.get("TTS_RATE", DEFAULT_RATE)
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="将学术速递 Markdown 生成中文语音播报。")
+    parser.add_argument("date", nargs="?", help="日期，格式 YYYY-MM-DD。")
+    parser.add_argument("--root", type=Path, default=WORK_DIR, help="项目根目录。")
+    parser.add_argument("--markdown", type=Path, help="输入 Markdown；相对路径基于项目根目录。")
+    parser.add_argument("--mp3", type=Path, help="输出 MP3；相对路径基于项目根目录。")
+    parser.add_argument("--transcript", type=Path, help="输出朗读稿；相对路径基于项目根目录。")
+    parser.add_argument("--voice", help="TTS voice；优先于环境变量和 JSON 配置。")
+    parser.add_argument("--rate", help="TTS rate；优先于环境变量和 JSON 配置。")
+    args = parser.parse_args(argv)
 
-    if len(sys.argv) > 1:
-        date_str = sys.argv[1]
-    else:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+    project = ProjectPaths.from_root(args.root)
+    try:
+        date_str = resolve_dispatch_date(args.date)
+    except ValueError as exc:
+        parser.error(str(exc))
+    artifacts = project.artifacts(date_str)
+    md_path = resolve_from_root(args.markdown, project.root, artifacts.markdown)
+    out_path = resolve_from_root(args.mp3, project.root, artifacts.audio)
+    txt_path = resolve_from_root(args.transcript, project.root, artifacts.transcript)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
 
-    md_path = DATA_DIR / f"{date_str}_学术速递.md"
+    env = load_env(project.root)
+    try:
+        tts_config = load_dispatch_config(project.config).raw.get("tts", {})
+    except (OSError, ValueError):
+        tts_config = {}
+    voice = args.voice or env.get("TTS_VOICE") or tts_config.get("voice") or DEFAULT_VOICE
+    rate = args.rate or env.get("TTS_RATE") or tts_config.get("rate") or DEFAULT_RATE
     if not md_path.exists():
         print(f"[ERROR] Markdown 文件不存在: {md_path}", file=sys.stderr)
-        sys.exit(1)
-
-    out_path = DATA_DIR / f"{date_str}_学术播报.mp3"
+        return 1
 
     md_text = md_path.read_text(encoding="utf-8")
     parsed = parse_markdown(md_text)
@@ -342,7 +190,6 @@ def main():
     else:
         broadcast_text = build_broadcast_text(parsed)
 
-    txt_path = DATA_DIR / f"{date_str}_播报稿.txt"
     txt_path.write_text(broadcast_text, encoding="utf-8")
 
     print(f"[INFO] 语音: {voice}, 语速: {rate}")
@@ -357,7 +204,8 @@ def main():
     print(f"[OK] 播报音频已生成: {out_path}")
     file_size = out_path.stat().st_size
     print(f"[INFO] 文件大小: {file_size / 1024:.1f} KB")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

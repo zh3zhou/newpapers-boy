@@ -5,11 +5,15 @@
 # 功能：检测 Python → 创建虚拟环境 → 安装依赖 → 复制 .env 模板 → 项目体检
 
 param(
-    [string]$PythonCmd = "py"
+    [string]$PythonCmd = ""
 )
 
 $ErrorActionPreference = "Stop"
 $WorkDir = $PSScriptRoot
+$InstalledPython312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
+if (-not $PythonCmd) {
+    $PythonCmd = if (Test-Path $InstalledPython312) { $InstalledPython312 } else { "python" }
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  会打岔的学术速递 — 环境初始化" -ForegroundColor Cyan
@@ -19,8 +23,8 @@ Write-Host ""
 # 1. 检测 Python
 Write-Host "[1/5] 检测 Python..." -ForegroundColor Yellow
 try {
-    $pyProbe = & $PythonCmd -c 'import sys; print("DISPATCH_PYTHON_PROBE=%d.%d.%d" % sys.version_info[:3])' 2>&1
-    if ($LASTEXITCODE -ne 0 -or "$pyProbe" -notmatch "DISPATCH_PYTHON_PROBE=(\d+)\.(\d+)\.(\d+)") {
+    $pyProbe = & $PythonCmd -c "import sys;print(sys.version_info[0],sys.version_info[1],sys.version_info[2])" 2>&1
+    if ($LASTEXITCODE -ne 0 -or "$pyProbe" -notmatch "^(\d+)\s+(\d+)\s+(\d+)$") {
         throw "Python 探针没有返回有效结果"
     }
     $major = [int]$Matches[1]
@@ -38,6 +42,20 @@ try {
 # 2. 创建虚拟环境
 $VenvDir = Join-Path $WorkDir ".venv"
 $PythonExe = Join-Path $VenvDir "Scripts\python.exe"
+if (Test-Path $PythonExe) {
+    $venvHealthy = $false
+    try {
+        & $PythonExe --version *> $null
+        $venvHealthy = ($LASTEXITCODE -eq 0)
+    } catch {
+        $venvHealthy = $false
+    }
+    if (-not $venvHealthy) {
+        $backup = Join-Path $WorkDir (".venv.broken-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+        Write-Host "[WARN] 现有 .venv 已损坏，保留为 $backup" -ForegroundColor Yellow
+        Move-Item -LiteralPath $VenvDir -Destination $backup
+    }
+}
 if (-not (Test-Path $PythonExe)) {
     Write-Host "[2/5] 创建虚拟环境 .venv ..." -ForegroundColor Yellow
     & $PythonCmd -m venv .venv
@@ -49,7 +67,7 @@ if (-not (Test-Path $PythonExe)) {
 # 3. 安装依赖
 Write-Host "[3/5] 安装依赖..." -ForegroundColor Yellow
 & $PythonExe -m pip install --upgrade pip | Out-Null
-& $PythonExe -m pip install -r (Join-Path $WorkDir "requirements.txt")
+& $PythonExe -m pip install -r (Join-Path $WorkDir "requirements.lock.txt")
 Write-Host "  依赖安装完成" -ForegroundColor Green
 
 # 4. 复制 .env 模板
@@ -78,6 +96,6 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "下一步：" -ForegroundColor Cyan
 Write-Host "  1. 编辑 .env 文件，填写 SMTP_USER / SMTP_PASS / MAIL_TO" -ForegroundColor White
-Write-Host "  2. 在项目里对 agent 说：请读取 AGENTS.md 和 config.md，运行今天的学术速递" -ForegroundColor White
+Write-Host "  2. 在项目里对 agent 说：请读取 AGENTS.md 和 dispatch.config.json，运行今天的学术速递" -ForegroundColor White
 Write-Host "  3. 自动运行诊断：.\scripts\setup_github_actions.ps1 -CheckOnly" -ForegroundColor White
 Write-Host ""

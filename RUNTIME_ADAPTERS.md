@@ -26,7 +26,7 @@
 自动化提示词至少应包含：
 
 ```text
-从项目根目录读取 AGENTS.md 和 config.md，运行当天的真实学术速递。
+从项目根目录读取 AGENTS.md 和 dispatch.config.json，运行当天的真实学术速递并 finalize；不要发送邮件。
 完成采集和 Markdown 后执行严格验证、TTS 和邮件。
 不要运行 mock，不要修改 GitHub 配置，不要提交生成物。
 失败时保留日志并明确报告失败步骤。
@@ -45,7 +45,7 @@
 明确告诉用户仍可在项目中说：
 
 ```text
-请读取 AGENTS.md 和 config.md，运行今天的学术速递。
+请读取 AGENTS.md 和 dispatch.config.json，运行今天的学术速递并 finalize；不要发送邮件。
 ```
 
 也可以对已有 Markdown 执行：

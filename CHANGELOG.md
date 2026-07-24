@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.0] - 2026-07-24
+
+- 将 `dispatch.config.json` 升级为唯一机器配置真源，加入 Schema、迁移器、精确依赖锁和 Python 3.9/3.12 CI。
+- 拆分 06:20 prepare 与 07:00 deliver：ready manifest 使用 SHA-256 封存，sent receipt 提供幂等与 Message-ID 证据。
+- 新增 30 天历史去重、7 天来源集中告警、艺术 5 条/3 来源/单源 2 条规则和五态链接判定。
+- 用 `runs.jsonl` 记录阶段事件；ready 失败时发送脱敏故障通知，绝不回退昨日内容。
+- 重构中英文 README、配置/部署/运维文档、公开示例和发布检查清单。
+
+## 2026-07-15
+
+- 将配置表、Markdown 内容模型、日期与工件路径抽成无副作用核心模块，解除 runner/doctor/validator 对 TTS 模块的隐式依赖。
+- 为 runner、validator、TTS、邮件和后处理入口增加显式项目根目录及可选工件路径，同时保留全部旧 CLI。
+- `run_daily.py` 现在同时识别 Windows 与 Linux/macOS 虚拟环境；新增 `setup.sh` 和模块方式运行支持。
+- 新增可移植性回归测试，覆盖任意根目录、配置表隔离、英文标题、日期、模块导入和 Unix venv。
+
 ## 2026-07-13
 
 - 将每日速递从 TRAE 专用工作流改造成平台中立的 agent 契约与确定性后处理架构。
