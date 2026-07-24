@@ -52,8 +52,15 @@ class ConfigContractTests(unittest.TestCase):
 
     def test_lock_has_exact_python39_and_modern_variants(self):
         lock = (Path(__file__).resolve().parents[1] / "requirements.lock.txt").read_text(encoding="utf-8")
-        self.assertIn('aiohappyeyeballs==2.6.1; python_version < "3.10"', lock)
-        self.assertIn('aiohappyeyeballs==2.7.1; python_version >= "3.10"', lock)
+        for python39, modern in (
+            ("aiohappyeyeballs==2.6.1", "aiohappyeyeballs==2.7.1"),
+            ("aiohttp==3.13.5", "aiohttp==3.14.3"),
+            ("propcache==0.4.1", "propcache==0.5.2"),
+            ("tabulate==0.9.0", "tabulate==0.10.0"),
+            ("yarl==1.22.0", "yarl==1.24.5"),
+        ):
+            self.assertIn(f'{python39}; python_version < "3.10"', lock)
+            self.assertIn(f'{modern}; python_version >= "3.10"', lock)
 
 
 class HistoryContractTests(unittest.TestCase):
